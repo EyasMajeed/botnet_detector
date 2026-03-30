@@ -228,4 +228,4 @@ PROTO_MAP = {
 # ──────────────────────────────────────────────
 RANDOM_SEED   = 42
 TIME_WINDOW_SEC = 10          # sliding-window width for time-window features
-MAX_ROWS_PER_DATASET = None   # set to int to subsample (useful for testing)
+MAX_ROWS_PER_DATASET = 1000000   # set to int to subsample (useful for testing)
