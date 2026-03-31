@@ -658,11 +658,6 @@ class SettingsPage(QWidget):
                 r.addLayout(c); r.addStretch(); r.addWidget(w); v.addLayout(r)
             return f
 
-        root.addWidget(scard("Model Configuration",[
-            (("Stage-1 Classifier","IoT vs Non-IoT separation"),mk_combo(["Random Forest","XGBoost","SVM"])),
-            (("Stage-2 IoT Model","Trained on IoT-23"),mk_combo(["CNN-LSTM","LSTM only","CNN only"])),
-            (("Stage-2 Non-IoT","Trained on CTU-13"),mk_combo(["CNN-LSTM","LSTM only","CNN only"])),
-        ]))
         root.addWidget(scard("Detection Settings",[
             (("Confidence Threshold","Flag as botnet if above this value"),mk_combo(["0.40","0.45","0.50","0.55","0.60"],cur=2)),
             (("Explainable AI (XAI)","Show feature importance per detection"),mk_tog(True)),
