@@ -381,28 +381,6 @@ class UploadPage(QWidget):
         fc.addWidget(self.fn); fc.addWidget(self.fm); fh.addLayout(fc); fh.addStretch()
         self.rb=BTN("▶  Run Detection","primary"); self.rb.setFixedWidth(160)
         self.rb.clicked.connect(self._run); fh.addWidget(self.rb); root.addWidget(self.fic)
-        # Config
-        cr=QHBoxLayout(); cr.setSpacing(14)
-        mc=QFrame(); mc.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
-        mv=QVBoxLayout(mc); mv.setContentsMargins(18,14,18,14); mv.setSpacing(10)
-        mv.addWidget(L("AI Model Configuration",14,bold=True)); mv.addWidget(SEP())
-        for lbl_,val in [("Stage-1","Random Forest (IoT vs Non-IoT)"),
-                         ("Stage-2 IoT","CNN-LSTM (IoT-23)"),("Stage-2 Non-IoT","CNN-LSTM (CTU-13)"),
-                         ("XAI","Feature Perturbation")]:
-            r=QHBoxLayout(); r.addWidget(L(lbl_,11,color=TG)); r.addStretch(); r.addWidget(L(val,11,color=TW))
-            mv.addLayout(r)
-        cr.addWidget(mc,1)
-        fc2=QFrame(); fc2.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
-        fv=QVBoxLayout(fc2); fv.setContentsMargins(18,14,18,14); fv.setSpacing(10)
-        fv.addWidget(L("Feature Extraction",14,bold=True)); fv.addWidget(SEP())
-        for nm,on in [("Flow-level statistical features",True),("Time-window temporal features",True),
-                      ("Packet-level features (PCAP)",True),("TLS handshake metadata",False)]:
-            cb=QCheckBox(nm); cb.setChecked(on); cb.setFont(QFont(FNT,12))
-            cb.setStyleSheet(f"QCheckBox{{color:{TW};background:transparent;spacing:8px;}}"
-                f"QCheckBox::indicator{{width:16px;height:16px;border-radius:4px;border:1px solid {BDR};background:{BG};}}"
-                f"QCheckBox::indicator:checked{{background:{ACC};border-color:{ACC};}}")
-            fv.addWidget(cb)
-        cr.addWidget(fc2,1); root.addLayout(cr)
         # Threshold
         tc=QFrame(); tc.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
         tv=QVBoxLayout(tc); tv.setContentsMargins(18,14,18,14); tv.setSpacing(10)
@@ -433,62 +411,7 @@ class UploadPage(QWidget):
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 3 — MONITORING
 # ══════════════════════════════════════════════════════════════════════════════
-class MonitorPage(QWidget):
-    def __init__(self):
-        super().__init__(); self.setStyleSheet(f"background:{BG};")
-        self._cnt=0; self._alerts=0; self._running=True; self._t0=datetime.now()
-        root=QVBoxLayout(self); root.setContentsMargins(24,24,24,24); root.setSpacing(14)
-        # Controls
-        ch=QHBoxLayout(); ch.addWidget(L("Live Traffic Monitor",18,bold=True)); ch.addStretch()
-        self.tog=BTN("⏸  Pause","primary"); self.tog.clicked.connect(self._toggle); ch.addWidget(self.tog)
-        ch.addSpacing(8); ch.addWidget(BTN("Clear","outline",small=True)); root.addLayout(ch)
-        # Live stat strip
-        sr=QHBoxLayout(); sr.setSpacing(10); self._ls={}
-        for t,v,c in [("Flows/sec","0",ACC),("Bandwidth","0 KB/s",OK),("Alerts","0",ERR),("Uptime","00:00:00",TG)]:
-            f=QFrame(); f.setStyleSheet(f"background:{CARD};border:none;border-radius:10px;")
-            fv=QVBoxLayout(f); fv.setContentsMargins(14,8,14,8); fv.setSpacing(2)
-            vl=L(v,16,bold=True,color=c,mono=True); fv.addWidget(L(t,10,color=TD)); fv.addWidget(vl)
-            self._ls[t]=vl; sr.addWidget(f)
-        root.addLayout(sr)
-        # Table card
-        tc=QFrame(); tc.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
-        tv=QVBoxLayout(tc); tv.setContentsMargins(0,0,0,0)
-        tb=QWidget(); tb.setFixedHeight(44)
-        tb.setStyleSheet(f"background:{BG};border-radius:12px 12px 0 0;border-bottom:1px solid {BDR};")
-        th=QHBoxLayout(tb); th.setContentsMargins(16,0,16,0)
-        th.addWidget(L("Real-time Flow Feed",13,bold=True)); th.addStretch()
-        self.lc=L("0 flows",11,color=TD); th.addWidget(self.lc); tv.addWidget(tb)
-        self.lt=QTableWidget(0,7)
-        self.lt.setHorizontalHeaderLabels(["Timestamp","Src IP","Dst IP","Protocol","Label","Confidence","Device"])
-        self.lt.verticalHeader().setVisible(False); self.lt.setShowGrid(False)
-        self.lt.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
-        self.lt.setStyleSheet(TABLE_CSS())
-        self.lt.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
-        self.lt.verticalHeader().setDefaultSectionSize(34); tv.addWidget(self.lt)
-        root.addWidget(tc)
-        self._timer=QTimer(self); self._timer.timeout.connect(self._add); self._timer.start(1600)
-
-    def _toggle(self):
-        if self._running: self._timer.stop(); self.tog.setText("▶  Resume")
-        else: self._timer.start(1600); self.tog.setText("⏸  Pause")
-        self._running=not self._running
-
-    def _add(self):
-        row=random.choice(DEMO); ib=row["lbl"]=="Botnet"; ts=datetime.now().strftime("%H:%M:%S")
-        r=self.lt.rowCount(); self.lt.insertRow(r)
-        for j,v in enumerate([ts,row["src"],row["dst"],row["proto"],row["lbl"],f"{row['conf']:.2f}",row["dev"]]):
-            it=QTableWidgetItem(v); it.setForeground(QColor(TW))
-            if j==4: it.setForeground(QColor(ERR if ib else OK)); it.setFont(QFont(FNT,11,QFont.Weight.Bold))
-            self.lt.setItem(r,j,it)
-        if ib: self._alerts+=1
-        if self.lt.rowCount()>50: self.lt.removeRow(0)
-        self.lt.scrollToBottom(); self._cnt+=1
-        up=str(datetime.now()-self._t0).split(".")[0]
-        self._ls["Flows/sec"].setText(str(random.randint(2,12)))
-        self._ls["Bandwidth"].setText(f"{random.randint(50,400)} KB/s")
-        self._ls["Alerts"].setText(str(self._alerts))
-        self._ls["Uptime"].setText(up)
-        self.lc.setText(f"{self._cnt} flows")
+from monitor_page import MonitorPage
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 4 — RESULTS
