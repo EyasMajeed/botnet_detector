@@ -20,6 +20,13 @@ from __future__ import annotations
 import random
 import time
 from typing import Any
+from models.stage1.classifier import Stage1Classifier
+_stage1 = Stage1Classifier.load("models/stage1/rf_model.pkl")
+device_type, confidence = _stage1.predict(df)
+
+from models.stage2.iot_detector import Stage2Detector
+detector = Stage2Detector.load("models/stage2/iot_cnn_lstm.pt")
+label, confidence = detector.predict(df)
 
 # ── Flip this when the real pipeline is ready ─────────────────────────────────
 USE_REAL_INFERENCE = False
