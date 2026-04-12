@@ -352,61 +352,8 @@ class DashPage(QWidget):
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 2 — UPLOAD
 # ══════════════════════════════════════════════════════════════════════════════
-class UploadPage(QWidget):
-    file_loaded=pyqtSignal(str)
-    def __init__(self):
-        super().__init__(); self.setStyleSheet(f"background:{BG};")
-        sc=QScrollArea(); sc.setWidgetResizable(True)
-        sc.setStyleSheet("QScrollArea{border:none;background:transparent;}")
-        inner=QWidget(); inner.setStyleSheet(f"background:{BG};")
-        root=QVBoxLayout(inner); root.setContentsMargins(24,24,24,24); root.setSpacing(18)
-        # Drop zone
-        dz=QFrame(); dz.setFixedHeight(200)
-        dz.setStyleSheet(f"QFrame{{background:{CARD};border:2px dashed {BDR};border-radius:12px;}}QFrame:hover{{border-color:{ACC};}}")
-        dz.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
-        dv=QVBoxLayout(dz); dv.setAlignment(Qt.AlignmentFlag.AlignCenter); dv.setSpacing(8)
-        up=L("⬆",36,color=ACC); up.setAlignment(Qt.AlignmentFlag.AlignCenter); dv.addWidget(up)
-        dv.addWidget(L("Click to upload or drag & drop",14,bold=True,color=TW))
-        self.hint=L("PCAP · CSV · NetFlow — Max 500 MB",12,color=TD); self.hint.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        dv.addWidget(self.hint); dv.addSpacing(8)
-        ub=BTN("Browse Files","primary"); ub.setFixedWidth(150); dv.addWidget(ub,alignment=Qt.AlignmentFlag.AlignCenter)
-        ub.clicked.connect(self._browse); dz.mousePressEvent=lambda e:self._browse(); root.addWidget(dz)
-        # File info card
-        self.fic=QFrame()
-        self.fic.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
-        self.fic.hide()
-        fh=QHBoxLayout(self.fic); fh.setContentsMargins(18,14,18,14)
-        fh.addWidget(L("📄",22))
-        fc=QVBoxLayout(); self.fn=L("file.pcap",13,bold=True); self.fm=L("—",11,color=TD)
-        fc.addWidget(self.fn); fc.addWidget(self.fm); fh.addLayout(fc); fh.addStretch()
-        self.rb=BTN("▶  Run Detection","primary"); self.rb.setFixedWidth(160)
-        self.rb.clicked.connect(self._run); fh.addWidget(self.rb); root.addWidget(self.fic)
-        # Threshold
-        tc=QFrame(); tc.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
-        tv=QVBoxLayout(tc); tv.setContentsMargins(18,14,18,14); tv.setSpacing(10)
-        tv.addWidget(L("Detection Sensitivity",14,bold=True))
-        tv.addWidget(L("Lower = higher recall (catches more botnets, more false alarms)",11,color=TD))
-        tr=QHBoxLayout(); tr.addWidget(L("Threshold:",12,color=TG))
-        self.sl2=QSlider(Qt.Orientation.Horizontal); self.sl2.setRange(10,90); self.sl2.setValue(50)
-        self.sl2.setStyleSheet(f"QSlider::groove:horizontal{{height:6px;background:{BDR};border-radius:3px;}}"
-            f"QSlider::handle:horizontal{{background:{ACC};width:18px;height:18px;margin:-6px 0;border-radius:9px;}}"
-            f"QSlider::sub-page:horizontal{{background:{ACC};border-radius:3px;}}")
-        self.tv2=L("0.50",13,bold=True,color=ACC,mono=True)
-        self.sl2.valueChanged.connect(lambda v:self.tv2.setText(f"{v/100:.2f}"))
-        tr.addWidget(self.sl2); tr.addWidget(self.tv2); tv.addLayout(tr); root.addWidget(tc)
-        root.addStretch()
-        sc.setWidget(inner); ol=QVBoxLayout(self); ol.setContentsMargins(0,0,0,0); ol.addWidget(sc)
+from upload_page import UploadPage
 
-    def _browse(self):
-        p,_=QFileDialog.getOpenFileName(self,"Open Traffic File","","Network Files (*.pcap *.csv *.netflow *.txt);;All Files (*)")
-        if p:
-            n=os.path.basename(p); s=os.path.getsize(p)
-            ss=f"{s/1024:.1f} KB" if s<1048576 else f"{s/1048576:.1f} MB"
-            self.fn.setText(n); self.fm.setText(f"{ss}  ·  Ready"); self.fic.show(); self.file_loaded.emit(p)
-
-    def _run(self):
-        QMessageBox.information(self,"Detection",
-            "In CPCS499 this will call your teammates'\npreprocess_and_predict() function.\n\nShowing demo results on the Results page.")
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 3 — MONITORING
