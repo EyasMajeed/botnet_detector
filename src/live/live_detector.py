@@ -105,6 +105,7 @@ def load_model(model_path: str):
     Load CNN-LSTM + scaler from disk.
     The scaler JSON must contain min/max of RAW (pre-normalization) features.
     """
+    
     ckpt = torch.load(model_path, map_location="cpu", weights_only=False)
 
     model = _CnnLstm(ckpt["n_features"])

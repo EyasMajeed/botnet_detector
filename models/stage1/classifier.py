@@ -44,14 +44,7 @@ from sklearn.preprocessing import LabelEncoder
 
 warnings.filterwarnings("ignore")
 
-# ── Try to import XGBoost (optional baseline) ────────────────────────
-try:
-    from xgboost import XGBClassifier
-    HAS_XGB = True
-except ImportError:
-    HAS_XGB = False
-    print("  [INFO] XGBoost not installed — skipping XGB baseline.")
-    print("         Install with: pip install xgboost")
+
 
 # ═══════════════════════════════════════════════════════════════════════
 # PATHS

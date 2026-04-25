@@ -9,7 +9,7 @@ What's upgraded vs the mock:
     - file_handler.load_file() validates + detects format instantly
     - File info card shows: format badge, size, estimated rows, columns
     - Warnings panel appears when the handler flags issues
-    - "Run Detection" calls inference_bridge.run_inference() (stub-ready)
+    - "Run Detection" calls inference_bridge.run_file_inference() (Stage-1 ready)
     - A progress overlay appears while processing
     - Emits  file_ready(FileInfo)  signal so other pages can react
 
@@ -32,7 +32,7 @@ from PyQt6.QtWidgets import (
 )
 
 from file_handler   import load_file, FileInfo, FileFormat
-from inference_bridge import run_inference
+from inference_bridge import run_inference, run_file_inference
 
 # ── Design tokens (must match mockApp.py) ─────────────────────────────────────
 BG   = "#1E1E2F";  CARD = "#16161F";  BDR = "#374151"
@@ -508,18 +508,7 @@ class UploadPage(QWidget):
         # The bridge receives the FileInfo object — when the real pipeline is
         # ready, teammates implement inference_bridge.run_file_inference(info).
         try:
-            # For now: pass a representative dummy flow dict so the stub
-            # returns a result. Real call: run_file_inference(self._current_file)
-            dummy_flow = {
-                "src_ip": "0.0.0.0", "dst_ip": "0.0.0.0",
-                "dst_port": 80, "protocol": "TCP",
-                "flow_duration": 1.0, "flow_pkts_per_sec": 10,
-                "flow_bytes_per_sec": 5000,
-                "_source_file": self._current_file.path,
-                "_file_format": self._current_file.format.name,
-            }
-            result = run_inference(dummy_flow)
-            results = [result]
+            results = run_file_inference(self._current_file)
         except Exception as e:
             results = []
             self._show_error(f"Inference error: {e}")

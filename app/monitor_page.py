@@ -26,6 +26,7 @@ the same globals as mockApp.py are in scope.
 from __future__ import annotations
 
 from datetime import datetime
+from pathlib import Path
 
 from PyQt6.QtCore    import Qt, QTimer, pyqtSlot
 from PyQt6.QtGui     import QColor, QFont
@@ -102,7 +103,7 @@ class MonitorPage(QWidget):
         self.setStyleSheet(f"background:{BG};")
 
         # State
-        self._running      = False
+        self._running      = True
         self._t0           = datetime.now()
         self._total_flows  = 0
         self._alert_count  = 0
@@ -111,7 +112,8 @@ class MonitorPage(QWidget):
 
         # Core components (not started yet)
         self._scorer  = SuspicionScorer()
-        self._thread  = LiveCaptureThread()  # auto-detects interface; falls back to demo if scapy unavailable
+        self._model_path = self._resolve_detector_model()
+        self._thread  = LiveCaptureThread(model_path=self._model_path)
         self._thread.flow_ready.connect(self._on_flow)
         self._thread.stats.connect(self._on_stats)
         self._thread.error.connect(self._on_error)
@@ -278,18 +280,27 @@ class MonitorPage(QWidget):
         if not self._running:
             return
 
+        # Ignore detector heartbeat frames that keep the UI alive
+        # if flow.get("_heartbeat"):
+        #     return
+
         # 1. Suspicion scoring (fast, no ML)
         score_result = self._scorer.score(flow)
         score        = score_result["score"]
         trigger_sniff= score_result["trigger_sniff"]
 
-        # 2. ML inference (stub or real)
-        infer = run_inference(flow)
-        self._last_latency = infer["latency_ms"]
-
-        label      = infer["label"]
-        confidence = infer["confidence"]
-        device     = infer["device_type"]
+        # 2. ML inference / detector mode
+        if "_label" in flow:
+            label      = flow.get("_label", "benign")
+            confidence = float(flow.get("_botnet_prob", 0.0))
+            device     = "iot" if flow.get("_alert") else "noniot"
+            self._last_latency = 0.0
+        else:
+            infer = run_inference(flow)
+            self._last_latency = infer["latency_ms"]
+            label      = infer["label"]
+            confidence = infer["confidence"]
+            device     = infer["device_type"]
 
         # 3. Update counters
         self._total_flows += 1
@@ -365,6 +376,11 @@ class MonitorPage(QWidget):
             # Default to first real interface (index 1, since index 0 is Demo)
             self._iface_cb.setCurrentIndex(1)
 
+    def _resolve_detector_model(self) -> Optional[str]:
+        root = Path(__file__).resolve().parents[1]
+        model_path = root / "models" / "stage2" / "iot_cnn_lstm.pt"
+        return str(model_path) if model_path.exists() else None
+
         self._iface_cb.blockSignals(False)
 
     def _on_iface_change(self, idx: int):
@@ -379,7 +395,11 @@ class MonitorPage(QWidget):
         if iface is None:
             self._thread = LiveCaptureThread(demo_mode=True)
         else:
-            self._thread = LiveCaptureThread(interface=iface, demo_mode=False)
+            self._thread = LiveCaptureThread(
+                interface=iface,
+                model_path=self._model_path,
+                demo_mode=False,
+            )
         self._thread.flow_ready.connect(self._on_flow)
         self._thread.stats.connect(self._on_stats)
         self._thread.error.connect(self._on_error)

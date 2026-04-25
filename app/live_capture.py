@@ -152,7 +152,7 @@ class LiveCaptureThread(QThread):
     def __init__(
         self,
         interface:     Optional[str] = None,
-        model_path:    Optional[str] = None,   # path to iot_cnn_lstm.pt
+        model_path:    Optional[str] = "models/stage2/iot_cnn_lstm.pt",   # path to iot_cnn_lstm.pt
         demo_mode:     bool          = False,
         emit_interval: float         = EMIT_INTERVAL,
     ) -> None:
