@@ -34,11 +34,15 @@ from PyQt6.QtWidgets import (
 from file_handler   import load_file, FileInfo, FileFormat
 from inference_bridge import run_inference, run_file_inference
 
-# ── Design tokens (must match mockApp.py) ─────────────────────────────────────
-BG   = "#1E1E2F";  CARD = "#16161F";  BDR = "#374151"
-TW   = "#FFFFFF";  TG   = "#9CA3AF";  TD  = "#6B7280"
-ACC  = "#3A7AFE";  OK   = "#10B981";  ERR = "#EF4444"
-WARN = "#F97316";  YEL  = "#EAB308";  FNT = "Segoe UI"
+# ── Design tokens ─────────────────────────────────────────────────────────────
+# Theme module (app/theme.py) is the single source of truth.
+from theme import (
+    BG, CARD, BDR, TW, TG, TD, ACC, OK, ERR, WARN, YEL, FNT,
+    ACCENT, TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    DANGER, DANGER_FAINT, SUCCESS, SUCCESS_FAINT,
+    icon,
+)
+from PyQt6.QtCore import QSize
 
 ACCEPT_FILTER = (
     "Network Traffic Files "
@@ -137,12 +141,12 @@ class DropZone(QFrame):
     file_dropped = pyqtSignal(str)
 
     _NORMAL_CSS = (
-        f"QFrame{{background:#16161F;border:2px dashed #374151;"
+        f"QFrame{{background:{CARD};border:2px dashed {BDR};"
         f"border-radius:12px;}}"
-        f"QFrame:hover{{border-color:#3A7AFE;}}"
+        f"QFrame:hover{{border-color:{ACC};}}"
     )
     _HOVER_CSS = (
-        f"QFrame{{background:#1A2040;border:2px dashed #3A7AFE;"
+        f"QFrame{{background:#1A2040;border:2px dashed {ACC};"
         f"border-radius:12px;}}"
     )
 
@@ -156,16 +160,20 @@ class DropZone(QFrame):
         v.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.setSpacing(8)
 
-        self._icon = _lbl("⬆", 36, color=ACC)
+        # Upload-cloud SVG icon (replaces the previous up-arrow emoji)
+        self._icon = QLabel()
+        self._icon.setPixmap(icon("upload-cloud", color=ACC, size=44).pixmap(44, 44))
         self._icon.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._icon.setStyleSheet("background:transparent;")
         v.addWidget(self._icon)
 
-        self._title = _lbl("Click to upload or drag & drop", 14, bold=True)
+        self._title = _lbl("Drop a file here", 14, bold=True)
         self._title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._title)
 
         self._sub = _lbl(
-            "PCAP · PCAPng · CSV · NetFlow  —  Max 500 MB", 11, color=TD
+            "or click Browse Files below  ·  PCAP · PCAPng · CSV · NetFlow  ·  Max 500 MB",
+            11, color=TD,
         )
         self._sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._sub)
@@ -184,11 +192,11 @@ class DropZone(QFrame):
 
     def dragLeaveEvent(self, event):
         self.setStyleSheet(self._NORMAL_CSS)
-        self._title.setText("Click to upload or drag & drop")
+        self._title.setText("Drop a file here")
 
     def dropEvent(self, event: QDropEvent):
         self.setStyleSheet(self._NORMAL_CSS)
-        self._title.setText("Click to upload or drag & drop")
+        self._title.setText("Drop a file here")
         urls = event.mimeData().urls()
         if urls:
             path = urls[0].toLocalFile()
@@ -216,10 +224,28 @@ class FileInfoCard(QFrame):
 
         # ── Top row: icon + name + badge + clear ──────────────────────────
         top = QHBoxLayout()
-        self._icon_lbl  = _lbl("📦", 22)
+        # File-type icon as SVG (replaces the package emoji previously here).
+        # The actual icon is set per-file-type in populate() via FORMAT_ICONS.
+        self._icon_lbl = QLabel()
+        self._icon_lbl.setPixmap(icon("file", color=TG, size=20).pixmap(20, 20))
+        self._icon_lbl.setStyleSheet("background:transparent;")
+        self._icon_lbl.setFixedSize(22, 22)
+
         self._name_lbl  = _lbl("—", 13, bold=True)
         self._fmt_badge = _badge("—", ACC)
-        self._clear_btn = _btn("✕", "danger", small=True, width=32)
+
+        # Clear button — small icon button using the x SVG (replaces "✕" text).
+        self._clear_btn = QPushButton()
+        self._clear_btn.setIcon(icon("x", color=TEXT_SECONDARY, size=14))
+        self._clear_btn.setIconSize(QSize(14, 14))
+        self._clear_btn.setFixedSize(28, 28)
+        self._clear_btn.setCursor(Qt.CursorShape.PointingHandCursor)
+        self._clear_btn.setToolTip("Clear file")
+        self._clear_btn.setStyleSheet(
+            f"QPushButton{{background:transparent;border:1px solid {BDR};"
+            f"border-radius:6px;}}"
+            f"QPushButton:hover{{background:{DANGER_FAINT};border-color:{DANGER};}}"
+        )
         self._clear_btn.clicked.connect(self._on_clear)
 
         top.addWidget(self._icon_lbl)
@@ -272,8 +298,22 @@ class FileInfoCard(QFrame):
 
     def populate(self, info: FileInfo):
         fmt_color = FORMAT_COLORS.get(info.format, ACC)
-
-        self._icon_lbl.setText(info.icon)
+        # Map FileFormat → asset icon name. Falls back to generic "file".
+        fmt_icon_name = {
+            FileFormat.PCAP:        "wifi",
+            FileFormat.PCAPNG:      "wifi",
+            FileFormat.CSV_UNIFIED: "file-text",
+            FileFormat.CSV_GENERIC: "file-text",
+            FileFormat.CSV_CICFLOW: "file-text",
+            FileFormat.CSV_CTU13:   "file-text",
+            FileFormat.CSV_UNSW:    "file-text",
+            FileFormat.NETFLOW_BIN: "archive",
+            FileFormat.NETFLOW_CSV: "archive",
+            FileFormat.UNKNOWN:     "alert-triangle",
+        }.get(info.format, "file")
+        self._icon_lbl.setPixmap(
+            icon(fmt_icon_name, color=fmt_color, size=20).pixmap(20, 20)
+        )
         self._name_lbl.setText(info.filename)
         self._fmt_badge.setText(info.format_label)
         self._fmt_badge.setStyleSheet(
@@ -307,7 +347,7 @@ class FileInfoCard(QFrame):
             self._col_preview.setText("")
 
         if info.warnings:
-            self._warn_lbl.setText("⚠  " + "  ·  ".join(info.warnings))
+            self._warn_lbl.setText("  ·  ".join(info.warnings))
             self._warn_lbl.show()
         else:
             self._warn_lbl.hide()
@@ -387,7 +427,9 @@ class UploadPage(QWidget):
 
         # ── Run button + progress ─────────────────────────────────────────
         run_row = QHBoxLayout()
-        self._run_btn = _btn("▶  Run Detection", "primary", width=180)
+        self._run_btn = _btn("Run Detection", "primary", width=180)
+        self._run_btn.setIcon(icon("play", color="white", size=14))
+        self._run_btn.setIconSize(QSize(14, 14))
         self._run_btn.setEnabled(False)
         self._run_btn.clicked.connect(self._run_detection)
         self._status_lbl = _lbl("Load a file to begin.", 11, color=TD)
@@ -475,13 +517,13 @@ class UploadPage(QWidget):
         self._file_card.populate(info)
         self._run_btn.setEnabled(True)
         self._status_lbl.setText(
-            f"✔  {info.format_label} detected — ready to run detection."
+            f"{info.format_label} detected — ready to run detection."
         )
         self._status_lbl.setStyleSheet(f"color:{OK};background:transparent;")
         self.file_ready.emit(info)
 
     def _show_error(self, msg: str):
-        self._error_lbl.setText(f"⚠  {msg}")
+        self._error_lbl.setText(msg)
         self._error_lbl.show()
         self._status_lbl.setText("File rejected.")
         self._status_lbl.setStyleSheet(f"color:{ERR};background:transparent;")
@@ -518,7 +560,7 @@ class UploadPage(QWidget):
 
         if results:
             self._status_lbl.setText(
-                f"✔  Detection complete — {len(results)} result(s) ready. "
+                f"Detection complete — {len(results)} result(s) ready. "
                 "Navigate to Results page to view."
             )
             self._status_lbl.setStyleSheet(f"color:{OK};background:transparent;")

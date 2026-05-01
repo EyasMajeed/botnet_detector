@@ -20,22 +20,17 @@ from PyQt6.QtGui   import (
 from PyQt6.QtCore import QPointF, QRectF
 
 # ── Design tokens ─────────────────────────────────────────────────────────────
-BG      = "#1E1E2F"
-CARD    = "#16161F"
-HOVER   = "#252535"
-ACC     = "#3A7AFE"
-ACC2    = "#2A5FD4"
-BDR     = "#374151"
-TW      = "#FFFFFF"
-TG      = "#9CA3AF"
-TD      = "#6B7280"
-TM      = "#D1D5DB"
-OK      = "#10B981"
-ERR     = "#EF4444"
-WARN    = "#F97316"
-INFO    = "#A855F7"
-YEL     = "#EAB308"
-FNT     = "Segoe UI"
+# Single source of truth lives in app/theme.py. The legacy short names (BG, CARD,
+# HOVER, ACC, ACC2, BDR, TW, TG, TD, TM, OK, ERR, WARN, INFO, YEL, FNT) are kept
+# as aliases over there so the rest of this file does not need touching.
+from theme import (
+    BG, CARD, HOVER, ACC, ACC2, BDR, TW, TG, TD, TM,
+    OK, ERR, WARN, INFO, YEL, FNT,
+    ACCENT, ACCENT_HOVER, ACCENT_PRESSED,
+    SURFACE, SURFACE_ELEVATED, BORDER,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    qss, icon, brand_mark_pixmap,
+)
 
 DEMO = [
     {"id":"FL-001","src":"192.168.1.5", "dst":"91.108.4.15",   "proto":"TCP",   "lbl":"Botnet","conf":0.92,"dev":"IoT",    "bytes":"14,200","dur":"5.3s","port":4444},
@@ -116,13 +111,21 @@ def TABLE_CSS():
 
 # ── Stat Card ─────────────────────────────────────────────────────────────────
 class StatCard(QFrame):
-    def __init__(self, icon, title, value, sub="", color=ACC):
+    """
+    Stat card: SVG icon badge on the left, title + value + sub-line on the right.
+    `icon_name` must match a file in app/assets/icons/ (without `.svg`).
+    Renamed parameter from `icon` to `icon_name` so it doesn't shadow the
+    imported theme.icon() helper.
+    """
+    def __init__(self, icon_name, title, value, sub="", color=ACC):
         super().__init__()
         self.setStyleSheet(f"QFrame{{background:{CARD};border:none;border-radius:12px;}}")
         h = QHBoxLayout(self); h.setContentsMargins(18,14,18,14); h.setSpacing(14)
-        ic = QLabel(icon); ic.setFixedSize(46,46)
+        # Icon badge: tinted square with the SVG icon centered in it.
+        ic = QLabel(); ic.setFixedSize(46, 46)
+        ic.setPixmap(icon(icon_name, color=color, size=22).pixmap(22, 22))
         ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        ic.setStyleSheet(f"background:{color}22;border:1px solid {color}44;border-radius:10px;font-size:20px;")
+        ic.setStyleSheet(f"background:{color}22;border:1px solid {color}44;border-radius:10px;")
         h.addWidget(ic)
         col = QVBoxLayout(); col.setSpacing(2)
         self.vl = L(value, 20, bold=True, color=color)
@@ -151,9 +154,16 @@ class PieChart(QWidget):
         p.setBrush(QColor(ERR)); p.drawPie(rect,90*16+ba,na)
         hs=sz*0.56; hx=(W-hs)/2; hy=(H-hs)/2
         p.setBrush(QColor(CARD)); p.drawEllipse(QRectF(hx,hy,hs,hs))
-        p.setPen(QColor(TW)); p.setFont(QFont(FNT,12,QFont.Weight.Bold))
+        # Center label: large percentage on top, small "botnet" caption below.
+        # (Previously crammed into one drawText with embedded \n.)
         pct=int(100*self.n/t)
-        p.drawText(rect,Qt.AlignmentFlag.AlignCenter,f"{pct}%\nbotnet")
+        cx, cy = W/2, H/2
+        p.setPen(QColor(TW)); p.setFont(QFont(FNT, 18, QFont.Weight.Bold))
+        p.drawText(QRectF(0, cy-22, W, 26),
+                   Qt.AlignmentFlag.AlignHCenter|Qt.AlignmentFlag.AlignBottom, f"{pct}%")
+        p.setPen(QColor(TG)); p.setFont(QFont(FNT, 10))
+        p.drawText(QRectF(0, cy+2, W, 16),
+                   Qt.AlignmentFlag.AlignHCenter|Qt.AlignmentFlag.AlignTop, "botnet")
         p.end()
 
 # ── Sparkline ─────────────────────────────────────────────────────────────────
@@ -168,16 +178,12 @@ class Spark(QWidget):
         mn,mx=min(self.vals),max(self.vals); rng=mx-mn or 1
         def pt(i,v): return (pad+(W-2*pad)*i/(len(self.vals)-1),
                               H-pad-(H-2*pad)*(v-mn)/rng)
+        # Dashed horizontal gridlines for context.
         p.setPen(QPen(QColor(BDR),1,Qt.PenStyle.DashLine))
         for f in [.25,.5,.75]:
             yy=int(pad+(H-2*pad)*(1-f)); p.drawLine(pad,yy,W-pad,yy)
-        poly=QPolygonF()
-        poly.append(QPointF(pad,H-pad))
-        for i,v in enumerate(self.vals): x,y=pt(i,v); poly.append(QPointF(x,y))
-        poly.append(QPointF(W-pad,H-pad))
-        g=QLinearGradient(0,0,0,H)
-        g.setColorAt(0,QColor(self.color+"55")); g.setColorAt(1,QColor(self.color+"00"))
-        p.setPen(Qt.PenStyle.NoPen); p.setBrush(QBrush(g)); p.drawPolygon(poly)
+        # Line only — gradient fill removed, the muddy yellow under-fill was
+        # competing with the red line for attention.
         p.setPen(QPen(QColor(self.color),2))
         for i in range(len(self.vals)-1):
             x1,y1=pt(i,self.vals[i]); x2,y2=pt(i+1,self.vals[i+1])
@@ -201,11 +207,12 @@ class HBar(QWidget):
             p.drawText(0,cy-8,lw-8,20,
                 Qt.AlignmentFlag.AlignRight|Qt.AlignmentFlag.AlignVCenter, name)
             p.setPen(Qt.PenStyle.NoPen)
-            p.setBrush(QColor(BDR)); p.drawRoundedRect(lw,cy-4,bw,8,4,4)
+            # Bars halved: was 8px tall (cy-4..cy+4), now 4px (cy-2..cy+2).
+            p.setBrush(QColor(BDR)); p.drawRoundedRect(lw,cy-2,bw,4,2,2)
             fw=int(bw*val/mx)
             if fw>0:
                 c=ERR if val>.7 else (WARN if val>.4 else ACC)
-                p.setBrush(QColor(c)); p.drawRoundedRect(lw,cy-4,fw,8,4,4)
+                p.setBrush(QColor(c)); p.drawRoundedRect(lw,cy-2,fw,4,2,2)
             p.setPen(QColor(TM)); p.setFont(QFont("Courier New",10))
             p.drawText(lw+bw+5,cy-8,48,20,
                 Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter,f"{val:.2f}")
@@ -216,44 +223,57 @@ class HBar(QWidget):
 # ══════════════════════════════════════════════════════════════════════════════
 class Sidebar(QWidget):
     switched = pyqtSignal(int)
-    NAV = [("🛡","Dashboard",0),("📤","Upload & Analyze",1),
-           ("📡","Monitoring",2),("📊","Results",3),
-           ("📋","Reports",4),("⚙","Settings",5)]
+    # (icon_name from assets/icons/, label, page_index)
+    NAV = [("layout-grid",  "Dashboard",        0),
+           ("upload-cloud", "Upload & Analyze", 1),
+           ("activity",     "Monitoring",       2),
+           ("list-checks",  "Results",          3),
+           ("file-text",    "Reports",          4),
+           ("settings",     "Settings",         5)]
     def __init__(self):
         super().__init__(); self.setFixedWidth(220)
         self.setStyleSheet(f"background:{CARD};")
-        self._btns=[]; root=QVBoxLayout(self); root.setContentsMargins(0,0,0,0); root.setSpacing(0)
-        # Logo
-        logo=QWidget(); logo.setFixedHeight(64)
+        self._btns=[]; self._icon_names=[]
+        root=QVBoxLayout(self); root.setContentsMargins(0,0,0,0); root.setSpacing(0)
+        # Logo header
+        logo=QWidget(); logo.setFixedHeight(72)
         logo.setStyleSheet(f"background:{CARD};")
-        lh=QHBoxLayout(logo); lh.setContentsMargins(16,0,16,0); lh.setSpacing(10)
-        ic=QLabel("🛡"); ic.setFont(QFont(FNT,22)); ic.setStyleSheet(f"color:{ACC};background:transparent;")
+        lh=QHBoxLayout(logo); lh.setContentsMargins(16,0,16,0); lh.setSpacing(12)
+        ic=QLabel(); ic.setPixmap(brand_mark_pixmap(28))
+        ic.setStyleSheet("background:transparent;")
         lh.addWidget(ic)
         tc=QVBoxLayout(); tc.setSpacing(0)
-        tc.addWidget(L("BotDetect",13,bold=True)); tc.addWidget(L("AI Security Suite",9,color=TD))
+        tc.addWidget(L("BotSense",14,bold=True))
+        tc.addWidget(L("AI Botnet Detection",9,color=TD))
         lh.addLayout(tc); lh.addStretch(); root.addWidget(logo)
         # Nav
         nav=QWidget(); nav.setStyleSheet("background:transparent;")
         nl=QVBoxLayout(nav); nl.setContentsMargins(10,14,10,14); nl.setSpacing(4)
-        for icon,name,idx in self.NAV:
-            b=QPushButton(f"  {icon}   {name}"); b.setFont(QFont(FNT,12))
-            b.setFixedHeight(42); b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+        for icon_name, name, idx in self.NAV:
+            b=QPushButton(f"   {name}"); b.setFont(QFont(FNT,12))
+            b.setIcon(icon(icon_name, color=TG, size=18))
+            from PyQt6.QtCore import QSize
+            b.setIconSize(QSize(18, 18))
+            b.setFixedHeight(40); b.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
             b.clicked.connect(lambda _,i=idx: self._sel(i))
-            self._btns.append(b); nl.addWidget(b)
+            self._btns.append(b); self._icon_names.append(icon_name); nl.addWidget(b)
         nl.addStretch(); root.addWidget(nav)
         # Footer
         ft=QWidget(); ft.setStyleSheet(f"background:transparent;")
         fl=QVBoxLayout(ft); fl.setContentsMargins(16,10,16,14); fl.setSpacing(2)
-        fl.addWidget(L("v1.0.0  ·  Group 07",10,color=TD)); fl.addWidget(L("CPCS499  ·  2025",10,color=TD))
+        fl.addWidget(L("v1.0.0  ·  Group 07",10,color=TD))
+        fl.addWidget(L("CPCS499  ·  2025",10,color=TD))
         root.addWidget(ft)
         self._sel(0)
 
     def _sel(self,idx):
         for i,b in enumerate(self._btns):
             if i==idx:
+                b.setIcon(icon(self._icon_names[i], color="white", size=18))
                 b.setStyleSheet(f"QPushButton{{background:{ACC};color:white;border:none;"
-                    f"border-radius:8px;text-align:left;padding-left:14px;font-weight:bold;}}")
+                    f"border-radius:8px;text-align:left;padding-left:14px;font-weight:600;}}")
             else:
+                b.setIcon(icon(self._icon_names[i], color=TG, size=18))
                 b.setStyleSheet(f"QPushButton{{background:transparent;color:{TG};border:none;"
                     f"border-radius:8px;text-align:left;padding-left:14px;}}"
                     f"QPushButton:hover{{background:{HOVER};color:white;}}")
@@ -268,13 +288,12 @@ class Header(QWidget):
         self.setStyleSheet(f"background:{CARD};border-bottom:1px solid {BDR};")
         h=QHBoxLayout(self); h.setContentsMargins(24,0,24,0)
         self.tl=L("Dashboard",18,bold=True); h.addWidget(self.tl); h.addStretch()
+        # System Active indicator. The wallclock timestamp that used to live
+        # here was decorative — removed in Pass 3 to reduce visual noise.
         dot=QLabel(); dot.setFixedSize(10,10)
         dot.setStyleSheet(f"background:{OK};border-radius:5px;")
         self.sl=L("System Active",13,color=TG)
-        self.cl=L("",12,color=TD,mono=True)
-        h.addWidget(dot); h.addSpacing(6); h.addWidget(self.sl); h.addSpacing(20); h.addWidget(self.cl)
-        t=QTimer(self); t.timeout.connect(lambda: self.cl.setText(datetime.now().strftime("%H:%M:%S"))); t.start(1000)
-        self.cl.setText(datetime.now().strftime("%H:%M:%S"))
+        h.addWidget(dot); h.addSpacing(6); h.addWidget(self.sl)
 
     def set_title(self,t): self.tl.setText(t)
 
@@ -302,10 +321,12 @@ class DashPage(QWidget):
         root=QVBoxLayout(inner); root.setContentsMargins(24,24,24,24); root.setSpacing(18)
         # Stat cards
         g=QGridLayout(); g.setSpacing(14)
-        self.sc_t=StatCard("📡","Total Flows","142","Last scan: 2 min ago",ACC)
-        self.sc_b=StatCard("⚠","Botnet Flows","18","12.7% of traffic",ERR)
-        self.sc_g=StatCard("✓","Benign Flows","124","87.3% of traffic",OK)
-        self.sc_d=StatCard("📱","Devices","34","12 IoT · 22 Non-IoT",INFO)
+        # Icon names map to app/assets/icons/<name>.svg.  Each is semantically
+        # tied to what the card actually represents, not just decoration.
+        self.sc_t=StatCard("radio",       "Total Flows", "142","Last scan: 2 min ago",ACC)
+        self.sc_b=StatCard("shield-alert","Botnet Flows","18", "12.7% of traffic",ERR)
+        self.sc_g=StatCard("shield-check","Benign Flows","124","87.3% of traffic",OK)
+        self.sc_d=StatCard("cpu",         "Devices",     "34", "12 IoT · 22 Non-IoT",INFO)
         for i,c in enumerate([self.sc_t,self.sc_b,self.sc_g,self.sc_d]): g.addWidget(c,0,i)
         root.addLayout(g)
         # Charts row
@@ -341,7 +362,9 @@ class DashPage(QWidget):
         t.verticalHeader().setDefaultSectionSize(34)
         for i,row in enumerate(DEMO[:6]):
             ib=row["lbl"]=="Botnet"
-            for j,v in enumerate([row["id"],row["src"],row["dst"],row["proto"],row["lbl"],f"{row['conf']:.2f}"]):
+            # Confidence column rendered as % to match the Monitoring page
+            # (where flow confidence shows as 59.47%, not 0.5947).
+            for j,v in enumerate([row["id"],row["src"],row["dst"],row["proto"],row["lbl"],f"{row['conf']:.0%}"]):
                 it=QTableWidgetItem(v); it.setForeground(QColor(TW))
                 if j==4: it.setForeground(QColor(ERR if ib else OK)); it.setFont(QFont(FNT,11,QFont.Weight.Bold))
                 if j in(0,3,5): it.setFont(QFont("Courier New",11))
@@ -420,7 +443,18 @@ class ResultsPage(QWidget):
         rv.addWidget(SEP()); rv.addWidget(L("Explanation",13,bold=True))
         self.expl=L("Select a flow to view.",11,color=TG,wrap=True)
         self.expl.setStyleSheet(f"color:{TG};background:{BG};border-left:3px solid {BDR};border-radius:4px;padding:8px 10px;")
-        rv.addWidget(self.expl); rv.addStretch(); root.addWidget(rw)
+        rv.addWidget(self.expl)
+        # Recommendation chip — small action pill, only shown for botnet flows.
+        # Hidden by default and toggled in _sel().
+        self.rec_chip = QLabel()
+        self.rec_chip.setStyleSheet(
+            f"color:{ERR};background:{ERR}22;border:1px solid {ERR}44;"
+            f"border-radius:10px;padding:4px 10px;font-size:11px;font-weight:600;"
+        )
+        self.rec_chip.setAlignment(Qt.AlignmentFlag.AlignLeft|Qt.AlignmentFlag.AlignVCenter)
+        self.rec_chip.hide()
+        rv.addWidget(self.rec_chip, alignment=Qt.AlignmentFlag.AlignLeft)
+        rv.addStretch(); root.addWidget(rw)
         self.rt.selectRow(0)
 
     def _sel(self):
@@ -438,6 +472,12 @@ class ResultsPage(QWidget):
             "Flow appears normal. Packet rates and timing within baseline. No suspicious patterns.")
         self.expl.setText(ex)
         self.expl.setStyleSheet(f"color:{TM};background:{BG};border-left:3px solid {ERR if ib else OK};border-radius:4px;padding:8px 10px;")
+        # Recommendation chip: only meaningful for botnet flows.
+        if ib:
+            self.rec_chip.setText("Recommended action: block source IP")
+            self.rec_chip.show()
+        else:
+            self.rec_chip.hide()
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 5 — REPORTS
@@ -454,9 +494,11 @@ class ReportsPage(QWidget):
         ec.clicked.connect(lambda:self._exp("CSV")); ep.clicked.connect(lambda:self._exp("PDF"))
         hh.addWidget(ec); hh.addSpacing(6); hh.addWidget(ep); root.addLayout(hh)
         g=QGridLayout(); g.setSpacing(12)
+        # Each card icon ties to what it actually represents:
+        # archive (history), clock (recency), target (accuracy), folder-open (files).
         for i,(t,v,s,c) in enumerate([("Total Reports","12","All time",ACC),("Last Scan","18","Botnet flows",ERR),
                                        ("Avg Accuracy","94%","All scans",OK),("Files Analyzed","47","PCAP+CSV",INFO)]):
-            g.addWidget(StatCard(["📋","⚠","✓","📁"][i],t,v,s,c),0,i)
+            g.addWidget(StatCard(["archive","clock","target","folder-open"][i],t,v,s,c),0,i)
         root.addLayout(g)
         hc=QFrame(); hc.setStyleSheet(f"background:{CARD};border:none;border-radius:12px;")
         hv=QVBoxLayout(hc); hv.setContentsMargins(18,14,18,14); hv.addWidget(L("Report History",14,bold=True)); hv.addSpacing(8)
@@ -474,11 +516,27 @@ class ReportsPage(QWidget):
               ("RPT-006","pcap_test2.pcap","2025-05-04","5","View"),
               ("RPT-005","live_capture.pcap","2025-05-03","9","View")]
         for i,(rid,fn,dt,bn,ac) in enumerate(data):
-            for j,v in enumerate([rid,fn,dt,bn,ac]):
+            # Columns 0-3 are data items (Report ID / Filename / Date / Botnet).
+            # The Botnet column is intentionally neutral — these are past
+            # results, not active threats; saturated red on every value made
+            # the table feel like everything was on fire.
+            for j,v in enumerate([rid,fn,dt,bn]):
                 it=QTableWidgetItem(v); it.setForeground(QColor(TW))
-                if j==3 and int(bn)>0: it.setForeground(QColor(ERR)); it.setFont(QFont(FNT,11,QFont.Weight.Bold))
+                if j==3: it.setForeground(QColor(TM))   # neutral past-data
                 if j==0: it.setFont(QFont("Courier New",11)); it.setForeground(QColor(ACC))
                 t.setItem(i,j,it)
+            # Column 4: actual button widget so all rows look identical.
+            view_btn = QPushButton("View")
+            view_btn.setFixedHeight(26)
+            view_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            view_btn.setStyleSheet(
+                f"QPushButton{{background:transparent;color:{ACC};border:1px solid {ACC}55;"
+                f"border-radius:6px;padding:0 12px;font-size:11px;font-weight:500;}}"
+                f"QPushButton:hover{{background:{ACC}22;border-color:{ACC};}}"
+            )
+            cell_w = QWidget(); cell_l = QHBoxLayout(cell_w)
+            cell_l.setContentsMargins(8, 4, 8, 4); cell_l.addWidget(view_btn); cell_l.addStretch()
+            t.setCellWidget(i, 4, cell_w)
         hv.addWidget(t); root.addWidget(hc); root.addStretch()
         sc.setWidget(inner); ol=QVBoxLayout(self); ol.setContentsMargins(0,0,0,0); ol.addWidget(sc)
 
@@ -513,6 +571,18 @@ class SettingsPage(QWidget):
             cb.setStyleSheet(f"QComboBox{{background:{BG};color:{TW};border:1px solid {BDR};border-radius:6px;padding:0 10px;font-size:12px;}}QComboBox::drop-down{{border:none;}}QComboBox QAbstractItemView{{background:{CARD};color:{TW};border:1px solid {BDR};}}")
             return cb
 
+        def mk_path_combo(opts, cur=0):
+            """Path-style combo: folder-open SVG icon prefix + combo box.
+            Used to visually differentiate file/path inputs from numeric ones.
+            """
+            w = QWidget(); w.setStyleSheet("background:transparent;")
+            h = QHBoxLayout(w); h.setContentsMargins(0, 0, 0, 0); h.setSpacing(8)
+            ic = QLabel(); ic.setPixmap(icon("folder-open", color=TG, size=16).pixmap(16, 16))
+            ic.setStyleSheet("background:transparent;")
+            cb = mk_combo(opts, cur)
+            h.addWidget(ic); h.addWidget(cb); h.addStretch()
+            return w
+
         def mk_tog(on=True):
             b=QPushButton("ON" if on else "OFF"); b.setFixedSize(64,28); b.setCheckable(True); b.setChecked(on)
             def upd(c): b.setText("ON" if c else "OFF"); b.setStyleSheet(f"background:{OK if c else BDR};color:white;border:none;border-radius:14px;font-size:11px;font-weight:bold;")
@@ -535,7 +605,7 @@ class SettingsPage(QWidget):
             (("Auto-export Reports","Save report after each scan"),mk_tog(False)),
         ]))
         root.addWidget(scard("System Preferences",[
-            (("Output Directory","Where exported reports are saved"),mk_combo(["Desktop/botnet_reports","Documents/reports"])),
+            (("Output Directory","Where exported reports are saved"),mk_path_combo(["Desktop/botnet_reports","Documents/reports"])),
             (("Table Row Limit","Max rows in results table"),mk_combo(["100","500","1000","Unlimited"])),
         ]))
         root.addStretch()
@@ -549,7 +619,7 @@ TITLES=["Dashboard","Upload & Analyze","Monitoring","Results","Reports","Setting
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("BotDetect — AI Security Suite  ·  Group 07")
+        self.setWindowTitle("BotSense — AI Botnet Detection  ·  Group 07")
         self.setMinimumSize(1200,720); self.resize(1440,880)
         self.setStyleSheet(f"background:{BG};")
         cw=QWidget(); self.setCentralWidget(cw)
@@ -580,4 +650,6 @@ if __name__=="__main__":
     pal.setColor(QPalette.ColorRole.Highlight,     QColor(ACC))
     pal.setColor(QPalette.ColorRole.HighlightedText,QColor("#FFFFFF"))
     app.setPalette(pal)
+    # Apply the BotSense global stylesheet (theme.py is the single source of truth).
+    app.setStyleSheet(qss())
     win=MainWindow(); win.show(); sys.exit(app.exec())

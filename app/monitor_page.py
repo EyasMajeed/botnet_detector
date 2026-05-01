@@ -8,7 +8,7 @@ What changed vs the mock:
     - No scoring          →  SuspicionScorer   (Section 7.3.4 thresholds)
     - No ML               →  inference_bridge  (stub today, real tomorrow)
     - Rows are colour-coded by SUSPICION SCORE, not just label
-    - Suspicious flows (score ≥ 2) show a 🔴 badge; mild (score 1) show 🟡
+    - Score column carries the number colored by severity (red/amber/green)
     - Status bar shows sniff-trigger count and inference latency
 
 How to use in mockApp.py:
@@ -40,11 +40,17 @@ from live_capture      import LiveCaptureThread, get_interfaces, SCAPY_AVAILABLE
 from suspicion_scorer  import SuspicionScorer
 from inference_bridge  import run_inference
 
-# ── Design tokens (must match mockApp.py) ─────────────────────────────────────
-BG   = "#1E1E2F";  CARD = "#16161F";  BDR = "#374151"
-TW   = "#FFFFFF";  TG   = "#9CA3AF";  TD  = "#6B7280"
-ACC  = "#3A7AFE";  OK   = "#10B981";  ERR = "#EF4444"
-WARN = "#F97316";  YEL  = "#EAB308";  FNT = "Segoe UI"
+# ── Design tokens ─────────────────────────────────────────────────────────────
+# Theme module (app/theme.py) is the single source of truth.
+from theme import (
+    BG, CARD, BDR, TW, TG, TD, ACC, OK, ERR, WARN, YEL, FNT,
+    ACCENT, ACCENT_HOVER, ACCENT_PRESSED,
+    TEXT_PRIMARY, TEXT_SECONDARY, TEXT_MUTED,
+    SUCCESS, SUCCESS_FAINT, WARNING, WARNING_FAINT,
+    DANGER, DANGER_FAINT,
+    icon,
+)
+from PyQt6.QtCore import QSize
 
 MAX_ROWS = 200   # keep last N flows in the table
 
@@ -155,7 +161,9 @@ class MonitorPage(QWidget):
         ch.addWidget(self._clr_btn)
         ch.addSpacing(8)
 
-        self._tog_btn = _btn("▶  Start", "primary")
+        self._tog_btn = _btn("Start", "primary")
+        self._tog_btn.setIcon(icon("play", color="white", size=14))
+        self._tog_btn.setIconSize(QSize(14, 14))
         self._tog_btn.clicked.connect(self._toggle)
         ch.addWidget(self._tog_btn)
         root.addLayout(ch)
@@ -174,9 +182,9 @@ class MonitorPage(QWidget):
             f = QFrame()
             f.setStyleSheet(f"background:{CARD};border:none;border-radius:10px;")
             fv = QVBoxLayout(f)
-            fv.setContentsMargins(14, 8, 14, 8)
-            fv.setSpacing(2)
-            vl = _lbl(val, 16, bold=True, color=color, mono=True)
+            fv.setContentsMargins(14, 6, 14, 6)
+            fv.setSpacing(0)
+            vl = _lbl(val, 14, bold=True, color=color, mono=True)
             fv.addWidget(_lbl(title, 10, color=TD))
             fv.addWidget(vl)
             self._stat_labels[title] = vl
@@ -246,7 +254,8 @@ class MonitorPage(QWidget):
         self._scorer.reset_baseline()
         self._thread.start()
         self._uptime_timer.start(1000)
-        self._tog_btn.setText("⏸  Pause")
+        self._tog_btn.setText("Pause")
+        self._tog_btn.setIcon(icon("pause", color="white", size=14))
         self._status_lbl.setText("● Capturing…")
         self._status_lbl.setStyleSheet(f"color:{OK};background:transparent;")
 
@@ -256,9 +265,12 @@ class MonitorPage(QWidget):
         self._running = False
         self._thread.stop()
         self._uptime_timer.stop()
-        self._tog_btn.setText("▶  Resume")
-        self._status_lbl.setText("Paused.")
-        self._status_lbl.setStyleSheet(f"color:{TG};background:transparent;")
+        self._tog_btn.setText("Resume")
+        self._tog_btn.setIcon(icon("play", color="white", size=14))
+        self._status_lbl.setText("● Paused")
+        # Paused state uses warning color so it's visually distinct from
+        # both "running" (green) and "idle/error" (gray/red).
+        self._status_lbl.setStyleSheet(f"color:{WARN};background:transparent;")
 
     # ── Qt lifecycle ──────────────────────────────────────────────────────────
 
@@ -297,7 +309,6 @@ class MonitorPage(QWidget):
             self._last_latency = 0.0
         else:
             infer = run_inference(flow)
-            print(f"[debug] {flow.get('src_ip')} → {infer.get('label')} "f"(device={infer.get('device_type')}, stage2_ran={infer.get('stage2_ran')})")
             self._last_latency = infer["latency_ms"]
             label      = infer["label"]
             confidence = infer["confidence"]
@@ -339,7 +350,7 @@ class MonitorPage(QWidget):
 
     @pyqtSlot(str)
     def _on_error(self, msg: str):
-        self._status_lbl.setText(f"⚠ {msg}")
+        self._status_lbl.setText(msg)
         self._status_lbl.setStyleSheet(f"color:{ERR};background:transparent;")
 
     def _toggle(self):
@@ -363,16 +374,16 @@ class MonitorPage(QWidget):
         """Fill the interface dropdown with real interfaces + a Demo option."""
         self._iface_cb.blockSignals(True)
         self._iface_cb.clear()
-        self._iface_cb.addItem("🔴  Demo Mode (simulated)", userData=None)
+        self._iface_cb.addItem("Demo Mode (simulated)", userData=None)
 
         ifaces = get_interfaces()
         for name, ip in ifaces:
-            self._iface_cb.addItem(f"📡  {name}  ({ip})", userData=name)
+            self._iface_cb.addItem(f"{name}   ({ip})", userData=name)
 
         if not ifaces and not SCAPY_AVAILABLE:
-            self._iface_cb.addItem("⚠  Scapy not installed — Demo only", userData=None)
+            self._iface_cb.addItem("Scapy not installed — Demo only", userData=None)
         elif not ifaces:
-            self._iface_cb.addItem("⚠  No interfaces found — run setup_live_capture.py", userData=None)
+            self._iface_cb.addItem("No interfaces found — run setup_live_capture.py", userData=None)
         else:
             # Default to first real interface (index 1, since index 0 is Demo)
             self._iface_cb.setCurrentIndex(1)
@@ -426,8 +437,8 @@ class MonitorPage(QWidget):
         else:
             row_bg = ""             # default
 
-        sniff_icon = "🔴 Yes" if sniff else "—"
-        score_str  = f"{'🔴' if score >= 2 else '🟡' if score == 1 else '🟢'} {score}"
+        sniff_icon = "Yes" if sniff else "—"
+        score_str  = str(score)
         label_str  = label.capitalize()
         conf_str   = f"{conf:.2%}"
         dev_str    = device.upper()
