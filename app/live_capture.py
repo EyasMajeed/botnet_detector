@@ -1,92 +1,90 @@
 """
-live_capture.py  —  Real-time packet capture thread
-=====================================================
-Captures live packets via Scapy, aggregates them into flow records
-(same format as pcap_parser.aggregate_packets_to_flows), then emits
-each flow as a Qt signal so MonitorPage can consume it safely.
+live_capture.py  —  Real-time packet capture thread (Phase B unified pipeline)
+==================================================================================
+Captures live packets via Scapy, runs Kitsune feature extraction per packet,
+aggregates flows, and emits flow_ready signals enriched with both Stage-1
+device classification and (when buffer is ready) Stage-2 IoT botnet probability.
 
-Architecture:
+Architecture (single unified path):
+
     LiveCaptureThread (QThread)
-        ├── sniff() runs in background thread
-        ├── Every EMIT_INTERVAL seconds, aggregates buffered packets → flows
-        └── Emits flow_ready(dict) signal → MonitorPage._on_flow(dict)
+        ┌── Per packet ───────────────────────────────────────────────┐
+        │  1. Update Kitsune extractor (115 N-BaIoT statistics)       │
+        │  2. Scale via iot_scaler.json → append to per-src_ip deque  │
+        │  3. Buffer raw packet for flow aggregation                  │
+        └─────────────────────────────────────────────────────────────┘
+        ┌── Every EMIT_INTERVAL seconds ──────────────────────────────┐
+        │  4. Aggregate buffered packets → 5-tuple flow dicts         │
+        │  5. For each flow:                                          │
+        │       a. Attach Kitsune sequence (if src_ip buffer is full) │
+        │       b. Emit flow_ready(dict) → MonitorPage                │
+        │       c. MonitorPage calls inference_bridge.run_inference()  │
+        │          which routes to Stage-1 RF and (for IoT) Stage-2   │
+        └─────────────────────────────────────────────────────────────┘
 
 Modes:
-    DETECTOR — full CNN-LSTM pipeline via LiveDetector (requires model_path +
-               scapy + root). Emits a flow dict on every botnet alert.
-               Also emits periodic benign-status flows every EMIT_INTERVAL.
-    LIVE     — plain scapy capture with packet→flow aggregation (no ML).
-               Used when scapy is available but no model_path is provided.
-    DEMO     — realistic simulated flows. Falls back automatically if scapy
-               is unavailable or no usable interface is found.
+    LIVE — real packet capture + full Stage-1 + Stage-2 IoT pipeline.
+           Requires scapy + sufficient privileges on the chosen interface.
+    DEMO — synthetic flows for development without root or scapy.
+           Falls back automatically when scapy is missing or no interface found.
 
-Usage:
-    # Demo mode (no args)
-    thread = LiveCaptureThread()
-
-    # Live mode (plain scapy, no model)
-    thread = LiveCaptureThread(interface="eth0")
-
-    # Detector mode (full CNN-LSTM pipeline)
-    thread = LiveCaptureThread(
-        interface  = "en0",
-        model_path = "models/stage2/iot_cnn_lstm.pt",
-    )
-
-    thread.flow_ready.connect(my_slot)
-    thread.error.connect(lambda msg: print(msg))
-    thread.stats.connect(lambda s: print(s))
-    thread.start()
-    ...
-    thread.stop()
+Removed in Phase B:
+    DETECTOR mode (delegated to LiveDetector). Live mode now subsumes it.
+    LiveDetector remains as a standalone CLI tool in src/live/live_detector.py.
 """
 
 from __future__ import annotations
 
+import json
 import random
+import sys
 import time
+from collections import defaultdict, deque
 from datetime import datetime
-from collections import defaultdict
+from pathlib import Path
 from typing import Optional
 
-from PyQt6.QtCore import QThread, pyqtSignal, QTimer
+import numpy as np
+from PyQt6.QtCore import QThread, pyqtSignal
+
+# ── Make project root importable so `src.live.kitsune_extractor` resolves
+#    regardless of where the GUI was launched from.
+ROOT = Path(__file__).resolve().parents[1]
+sys.path.insert(0, str(ROOT))
 
 # ── Scapy import (graceful fallback to demo mode) ─────────────────────────────
 try:
-    from scapy.all import sniff, IP, TCP, UDP, conf as scapy_conf, get_if_list, get_if_addr
-    scapy_conf.verb = 0          # silence scapy noise
+    from scapy.all import (
+        sniff, IP, TCP, UDP, Ether,
+        conf as scapy_conf, get_if_list, get_if_addr,
+    )
+    scapy_conf.verb = 0
     SCAPY_AVAILABLE = True
 except ImportError:
     SCAPY_AVAILABLE = False
 
-# ── LiveDetector import (graceful fallback to plain-scapy / demo mode) ────────
+# ── Kitsune extractor (graceful fallback: live mode runs without Stage-2) ─────
 try:
-    from src.live.live_detector import LiveDetector
-    LIVE_DETECTOR_AVAILABLE = True
+    from src.live.kitsune_extractor import KitsuneExtractor
+    KITSUNE_AVAILABLE = True
 except ImportError:
-    LIVE_DETECTOR_AVAILABLE = False
+    KITSUNE_AVAILABLE = False
 
 # ── Constants ─────────────────────────────────────────────────────────────────
-EMIT_INTERVAL  = 2.0    # seconds between flow emissions in live/demo mode
-PACKET_BUFFER  = 50     # max packets to buffer before forcing a flush
-PREF_IFACES    = ("wi-fi", "wlan", "en0", "en1", "eth0", "ethernet")
+EMIT_INTERVAL    = 2.0     # seconds between flow flushes
+PACKET_BUFFER    = 50      # max packets buffered before forced flush
+KITSUNE_SEQ_LEN  = 20      # rows per src_ip buffer (matches iot_cnn_lstm.pt training)
+PREF_IFACES      = ("wi-fi", "wlan", "en0", "en1", "eth0", "ethernet")
+
+IOT_SCALER_PATH = ROOT / "models" / "stage2" / "iot_scaler.json"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Interface helpers
+# Interface helpers (unchanged from Phase A)
 # ══════════════════════════════════════════════════════════════════════════════
 
 def get_interfaces() -> list[tuple[str, str]]:
-    """
-    Return a list of (interface_name, ip_address) tuples for all
-    non-loopback interfaces that have a real IP assigned.
-
-    Used by MonitorPage to populate the interface selector dropdown.
-    Returns [] if Scapy is not installed.
-
-    Example:
-        [("Wi-Fi", "192.168.1.10"), ("Ethernet", "10.0.0.5")]
-    """
+    """Return [(iface_name, ip_address), ...] for interfaces with a real IP."""
     if not SCAPY_AVAILABLE:
         return []
     result = []
@@ -98,241 +96,177 @@ def get_interfaces() -> list[tuple[str, str]]:
         is_loopback = any(x in iface.lower() for x in ["lo", "loopback", "npcap loopback"])
         if ip and ip != "0.0.0.0" and not is_loopback:
             result.append((iface, ip))
+    if not result:
+        for iface in get_if_list():
+            if not any(x in iface.lower() for x in ["lo", "loopback", "npcap loopback"]):
+                result.append((iface, "0.0.0.0"))
     return result
 
 
 def auto_select_interface() -> Optional[str]:
-    """
-    Pick the 'best' interface automatically:
-      - Prefers Wi-Fi / wlan / en0 / Ethernet names
-      - Falls back to first non-loopback interface with a real IP
-    Returns None if nothing suitable is found.
-    """
+    """Return the most likely user-facing interface name, or None."""
     if not SCAPY_AVAILABLE:
         return None
-    available = get_interfaces()
-    if not available:
+    candidates = get_interfaces()
+    if not candidates:
         return None
-    for name, _ in available:
-        if any(p in name.lower() for p in PREF_IFACES):
-            return name
-    return available[0][0]
+    for pref in PREF_IFACES:
+        for iface, _ in candidates:
+            if pref in iface.lower():
+                return iface
+    return candidates[0][0]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# Demo flows (used when scapy / model unavailable)
+# Kitsune scaler — loaded once at thread init
 # ══════════════════════════════════════════════════════════════════════════════
 
-_DEMO_FLOWS: list[dict] = [
-    {"src_ip":"192.168.1.5",  "dst_ip":"8.8.8.8",           "src_port":53012,"dst_port":53,   "protocol":"UDP",   "total_fwd_bytes":150,   "total_bwd_bytes":220,  "flow_duration":0.08, "flow_pkts_per_sec":25,  "flow_bytes_per_sec":4625,  "flag_SYN":0,"flag_ACK":0,"flag_FIN":0,"flag_RST":0,"total_fwd_packets":1, "total_bwd_packets":1},
-    {"src_ip":"10.0.0.15",    "dst_ip":"10.0.0.1",           "src_port":41000,"dst_port":22,   "protocol":"TCP",   "total_fwd_bytes":3200,  "total_bwd_bytes":4800, "flow_duration":12.0, "flow_pkts_per_sec":10,  "flow_bytes_per_sec":667,   "flag_SYN":1,"flag_ACK":1,"flag_FIN":0,"flag_RST":0,"total_fwd_packets":30,"total_bwd_packets":45},
-    {"src_ip":"192.168.1.12", "dst_ip":"185.100.87.41",      "src_port":60012,"dst_port":6667, "protocol":"TCP",   "total_fwd_bytes":2048,  "total_bwd_bytes":512,  "flow_duration":0.4,  "flow_pkts_per_sec":300, "flow_bytes_per_sec":6400,  "flag_SYN":1,"flag_ACK":0,"flag_FIN":0,"flag_RST":0,"total_fwd_packets":8, "total_bwd_packets":2},
-    {"src_ip":"10.0.0.22",    "dst_ip":"216.58.208.14",      "src_port":49100,"dst_port":443,  "protocol":"HTTPS", "total_fwd_bytes":4200,  "total_bwd_bytes":31000,"flow_duration":3.5,  "flow_pkts_per_sec":22,  "flow_bytes_per_sec":10057, "flag_SYN":1,"flag_ACK":1,"flag_FIN":1,"flag_RST":0,"total_fwd_packets":15,"total_bwd_packets":50},
+class _KitsuneScaler:
+    """
+    Wraps iot_scaler.json for fast vector-level scaling.
+
+    The training pipeline applied MinMaxScaler to raw Kitsune output before
+    saving the IoT model. The scaler.json stores the raw min/max so we can
+    reproduce the same transformation at inference time.
+
+    Returns clipped [0, 1] float32 vectors.
+    """
+
+    def __init__(self, scaler_path: Path):
+        with open(scaler_path) as f:
+            data = json.load(f)
+        self.feat_min = np.array(data["min"], dtype=np.float32)
+        self.feat_max = np.array(data["max"], dtype=np.float32)
+        self.range    = self.feat_max - self.feat_min
+        # Guard against zero-range features (constant during training)
+        self.range[self.range == 0.0] = 1.0
+
+        # Sanity check: if max ≤ 1.0 across the board, the scaler was exported
+        # from already-normalized data and applying it will collapse live values.
+        if self.feat_max.max() < 2.0:
+            raise ValueError(
+                f"{scaler_path} has all max values <= 1.0 — looks like it was "
+                "exported from the already-normalized CSV. Re-run "
+                "preprocess_nbaiot.py to regenerate the raw-range scaler."
+            )
+
+    def scale(self, raw_vec: np.ndarray) -> np.ndarray:
+        scaled = (raw_vec - self.feat_min) / self.range
+        return np.clip(scaled, 0.0, 1.0).astype(np.float32)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Demo flows (unchanged)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_DEMO_FLOWS = [
+    {"src_ip":"192.168.1.10","dst_ip":"8.8.8.8","src_port":54321,"dst_port":443,
+     "protocol":6,"flow_duration":0.42,"total_fwd_packets":12,"total_bwd_packets":10,
+     "total_fwd_bytes":1500,"total_bwd_bytes":12000,
+     "flow_pkts_per_sec":52.4,"flow_bytes_per_sec":32100,
+     "flag_SYN":1,"flag_ACK":18,"flag_FIN":1,"flag_RST":0,"flag_PSH":4,"flag_URG":0},
+    {"src_ip":"192.168.1.42","dst_ip":"185.199.108.153","src_port":48923,"dst_port":443,
+     "protocol":6,"flow_duration":1.85,"total_fwd_packets":48,"total_bwd_packets":52,
+     "total_fwd_bytes":7400,"total_bwd_bytes":62000,
+     "flow_pkts_per_sec":54.0,"flow_bytes_per_sec":37500,
+     "flag_SYN":1,"flag_ACK":98,"flag_FIN":1,"flag_RST":0,"flag_PSH":15,"flag_URG":0},
+    {"src_ip":"192.168.1.103","dst_ip":"172.217.16.142","src_port":33567,"dst_port":80,
+     "protocol":6,"flow_duration":0.18,"total_fwd_packets":4,"total_bwd_packets":3,
+     "total_fwd_bytes":400,"total_bwd_bytes":1200,
+     "flow_pkts_per_sec":38.9,"flow_bytes_per_sec":8888,
+     "flag_SYN":1,"flag_ACK":6,"flag_FIN":1,"flag_RST":0,"flag_PSH":2,"flag_URG":0},
 ]
 
 
 # ══════════════════════════════════════════════════════════════════════════════
-# LiveCaptureThread
+# LiveCaptureThread — Phase B unified pipeline
 # ══════════════════════════════════════════════════════════════════════════════
 
 class LiveCaptureThread(QThread):
-    """
-    Background thread that captures packets and emits flow dicts.
-
-    Signals:
-        flow_ready(dict)  — one flow record ready for processing
-        error(str)        — something went wrong (shown in status bar)
-        stats(dict)       — periodic bandwidth/pps stats for the stat strip
-    """
-
-    flow_ready = pyqtSignal(dict)
+    flow_ready = pyqtSignal(dict)   # one completed flow dict (with optional _kitsune_seq)
     error      = pyqtSignal(str)
     stats      = pyqtSignal(dict)
 
     def __init__(
         self,
-        interface:     Optional[str] = None,
-        model_path:    Optional[str] = "models/stage2/iot_cnn_lstm.pt",   # path to iot_cnn_lstm.pt
-        demo_mode:     bool          = False,
-        emit_interval: float         = EMIT_INTERVAL,
+        interface:        Optional[str] = None,
+        model_path:       Optional[str] = None,   # kept for backward-compat; now unused
+        demo_mode:        bool          = False,
+        emit_interval:    float         = EMIT_INTERVAL,
+        enable_kitsune:   bool          = True,
     ) -> None:
         super().__init__()
 
-        # If scapy is missing, force demo mode regardless of what caller asked
         if not SCAPY_AVAILABLE:
             demo_mode = True
 
-        # Auto-detect best interface when not explicitly provided
         if not demo_mode and interface is None:
             interface = auto_select_interface()
             if interface is None:
-                demo_mode = True   # no usable interface found
+                demo_mode = True
 
         self.interface     = interface
-        self.model_path    = model_path
         self.demo_mode     = demo_mode
         self.emit_interval = emit_interval
 
-        self._running      = False
-        self._detector: Optional[LiveDetector] = None   # set in _run_detector
+        # Phase B state — Kitsune extraction and per-src_ip buffer
+        self._kitsune: Optional[KitsuneExtractor] = None
+        self._scaler:  Optional[_KitsuneScaler]   = None
+        self._kit_buffers: dict[str, deque] = defaultdict(
+            lambda: deque(maxlen=KITSUNE_SEQ_LEN)
+        )
+        self._kitsune_enabled = False
+
+        if enable_kitsune and not demo_mode and KITSUNE_AVAILABLE:
+            try:
+                if not IOT_SCALER_PATH.exists():
+                    raise FileNotFoundError(
+                        f"IoT scaler not found at {IOT_SCALER_PATH}"
+                    )
+                self._scaler = _KitsuneScaler(IOT_SCALER_PATH)
+                self._kitsune = KitsuneExtractor()
+                self._kitsune_enabled = True
+            except Exception as e:
+                # Don't fail thread startup — Stage-2 IoT just won't fire.
+                # Stage-1 still runs and the user sees flows.
+                self._kitsune_enabled = False
+                self._kitsune_init_error = str(e)
+
+        self._running     = False
         self._pkt_buffer: list[dict] = []
-        self._last_emit    = time.monotonic()
-        self._total_flows  = 0
-        self._total_pkts   = 0
+        self._last_emit   = time.monotonic()
+        self._total_flows = 0
+        self._total_pkts  = 0
 
     # ── Thread entry point ────────────────────────────────────────────────────
 
     def run(self) -> None:
         self._running = True
 
+        # Surface Kitsune init error once on startup so the user knows
+        # Stage-2 IoT won't fire even though the thread is running.
+        if (not self.demo_mode) and (not self._kitsune_enabled) and KITSUNE_AVAILABLE:
+            err = getattr(self, "_kitsune_init_error", "Kitsune disabled")
+            self.error.emit(
+                f"Stage-2 IoT disabled: {err}. "
+                "Stage-1 device classification will still run."
+            )
+
         if self.demo_mode:
             self._run_demo()
-        elif self.model_path and LIVE_DETECTOR_AVAILABLE:
-            self._run_detector()
         else:
             self._run_live()
 
     def stop(self) -> None:
-        """Signal all capture loops to halt."""
+        """Signal the capture loop to halt."""
         self._running = False
-        if self._detector is not None:
-            self._detector.stop()
 
-    # ── Detector mode (LiveDetector → CNN-LSTM inference) ─────────────────────
-
-    def _run_detector(self) -> None:
-        """
-        Delegate packet capture and inference entirely to LiveDetector.
-
-        LiveDetector.start() is blocking; it runs Scapy's sniff() loop in
-        this thread and calls on_alert() (and optionally on_packet()) from
-        within that same thread.  Qt signals are thread-safe, so emitting
-        from here is fine.
-
-        Flow dict emitted on every BOTNET alert:
-            _label          : "botnet"
-            _botnet_prob    : float confidence (0-1)
-            _alert          : True
-            src_ip          : IP of suspected device
-            + zero-filled flow statistics (no aggregation done in detector mode)
-
-        A periodic benign status ping is emitted every EMIT_INTERVAL seconds
-        so MonitorPage stat counters keep ticking even during quiet periods.
-        """
-
-        def _on_alert(src_ip: str, prob: float, t: float) -> None:
-            """Called by LiveDetector for every botnet-confidence packet."""
-            flow: dict = {
-                # ── Identity ──────────────────────────────────────────────
-                "src_ip":             src_ip,
-                "dst_ip":             "unknown",
-                "src_port":           0,
-                "dst_port":           0,
-                "protocol":           "unknown",
-                # ── Flow statistics (unavailable at alert time) ────────────
-                "total_fwd_bytes":    0,
-                "total_bwd_bytes":    0,
-                "total_fwd_packets":  0,
-                "total_bwd_packets":  0,
-                "flow_duration":      0.0,
-                "flow_pkts_per_sec":  0.0,
-                "flow_bytes_per_sec": 0.0,
-                "flag_SYN": 0, "flag_ACK": 0,
-                "flag_FIN": 0, "flag_RST": 0,
-                # ── Detection result ──────────────────────────────────────
-                "_label":             "botnet",
-                "_botnet_prob":       round(prob, 4),
-                "_alert":             True,
-            }
-            self.flow_ready.emit(flow)
-            self._total_flows += 1
-            self.stats.emit({
-                "flows_per_sec":  1,
-                "bandwidth_kbps": 0,
-                "total_flows":    self._total_flows,
-            })
-
-        def _on_packet_status(detector: "LiveDetector") -> None:
-            """
-            Emit a lightweight benign ping every EMIT_INTERVAL seconds so
-            MonitorPage doesn't appear frozen between alerts.
-            Called from a QTimer in the main thread — but since we're in a
-            QThread, we use a plain time-based loop instead.
-            """
-            pass  # handled below in the polling loop
-
-        try:
-            self._detector = LiveDetector(
-                model_path = self.model_path,
-                interface  = self.interface,
-                on_alert   = _on_alert,
-                verbose    = True,
-            )
-        except Exception as e:
-            self.error.emit(f"LiveDetector init failed: {e}")
-            return
-
-        # Run in a separate daemon thread so we can do our own polling loop
-        import threading
-        capture_thread = threading.Thread(
-            target=self._detector.start,
-            daemon=True,
-        )
-        capture_thread.start()
-
-        # ── Polling loop: emit status pings + watch for stop signal ──────────
-        while self._running and capture_thread.is_alive():
-            time.sleep(self.emit_interval)
-
-            status = self._detector.get_status()
-            pkts   = status.get("packets", 0)
-
-            # Emit a benign heartbeat flow so the UI stat strip keeps updating
-            heartbeat: dict = {
-                "src_ip":             "—",
-                "dst_ip":             "—",
-                "src_port":           0,
-                "dst_port":           0,
-                "protocol":           "—",
-                "total_fwd_bytes":    0,
-                "total_bwd_bytes":    0,
-                "total_fwd_packets":  0,
-                "total_bwd_packets":  0,
-                "flow_duration":      0.0,
-                "flow_pkts_per_sec":  0.0,
-                "flow_bytes_per_sec": 0.0,
-                "flag_SYN": 0, "flag_ACK": 0,
-                "flag_FIN": 0, "flag_RST": 0,
-                "_label":             "benign",
-                "_botnet_prob":       0.0,
-                "_alert":             False,
-                "_heartbeat":         True,
-                "_packets_seen":      pkts,
-            }
-            self.flow_ready.emit(heartbeat)
-            self.stats.emit({
-                "flows_per_sec":  0,
-                "bandwidth_kbps": 0,
-                "total_flows":    self._total_flows,
-                "packets_seen":   pkts,
-                "devices":        status.get("devices", 0),
-                "alerts":         status.get("alerts", 0),
-            })
-
-        # Ensure capture thread is stopped
-        if self._detector:
-            self._detector.stop()
-        capture_thread.join(timeout=3.0)
-
-    # ── Live mode (plain scapy — no model) ────────────────────────────────────
+    # ── Live mode (unified pipeline) ──────────────────────────────────────────
 
     def _run_live(self) -> None:
         """
-        Sniff real packets on self.interface.
-        Packets are buffered and flushed as aggregated flow dicts every
-        EMIT_INTERVAL seconds (or when PACKET_BUFFER is reached).
-
-        Requires: pip install scapy  +  root/admin privileges.
+        Sniff real packets on self.interface, run Kitsune per packet,
+        and flush flows every EMIT_INTERVAL seconds.
         """
         try:
             sniff(
@@ -351,29 +285,63 @@ class LiveCaptureThread(QThread):
             self.error.emit(f"Capture error: {e}")
 
     def _handle_packet(self, pkt) -> None:
-        """Scapy callback — called for every captured packet in live mode."""
+        """Scapy callback — runs for every captured packet."""
         if IP not in pkt:
             return
 
+        # ── Build the raw record used by the flow aggregator ──────────────
+        ip_layer = pkt[IP]
+        ts = float(pkt.time)
+
         rec: dict = {
-            "frame.time_epoch": str(float(pkt.time)),
-            "ip.src":           pkt[IP].src,
-            "ip.dst":           pkt[IP].dst,
-            "ip.proto":         str(pkt[IP].proto),
+            "frame.time_epoch": str(ts),
+            "ip.src":           ip_layer.src,
+            "ip.dst":           ip_layer.dst,
+            "ip.proto":         str(ip_layer.proto),
             "frame.len":        str(len(pkt)),
-            "ip.ttl":           str(pkt[IP].ttl),
+            "ip.ttl":           str(ip_layer.ttl),
         }
+        sport = dport = 0
         if TCP in pkt:
             rec["tcp.srcport"] = str(pkt[TCP].sport)
             rec["tcp.dstport"] = str(pkt[TCP].dport)
             rec["tcp.flags"]   = str(int(pkt[TCP].flags))
+            sport, dport = int(pkt[TCP].sport), int(pkt[TCP].dport)
+            proto_name = "TCP"
         elif UDP in pkt:
             rec["udp.srcport"] = str(pkt[UDP].sport)
             rec["udp.dstport"] = str(pkt[UDP].dport)
+            sport, dport = int(pkt[UDP].sport), int(pkt[UDP].dport)
+            proto_name = "UDP"
+        else:
+            proto_name = "OTHER"
 
         self._pkt_buffer.append(rec)
         self._total_pkts += 1
 
+        # ── Per-packet Kitsune update + per-src_ip buffer append ──────────
+        if self._kitsune_enabled:
+            try:
+                src_mac = pkt[Ether].src if Ether in pkt else ip_layer.src
+                raw_vec = self._kitsune.update(
+                    timestamp = ts,
+                    src_mac   = src_mac,
+                    src_ip    = ip_layer.src,
+                    dst_ip    = ip_layer.dst,
+                    src_port  = sport,
+                    dst_port  = dport,
+                    pkt_len   = len(pkt),
+                    protocol  = proto_name,
+                )
+                scaled = self._scaler.scale(raw_vec)
+                self._kit_buffers[ip_layer.src].append(scaled)
+            except Exception:
+                # A single packet failing Kitsune shouldn't break capture.
+                # Silently drop; if this becomes systematic, _kit_buffers
+                # will stay empty and Stage-2 IoT will simply never fire.
+                pass
+
+        # ── Periodic flush ────────────────────────────────────────────────
         now = time.monotonic()
         if (len(self._pkt_buffer) >= PACKET_BUFFER or
                 now - self._last_emit >= self.emit_interval):
@@ -381,7 +349,7 @@ class LiveCaptureThread(QThread):
             self._last_emit = now
 
     def _flush_buffer(self) -> None:
-        """Aggregate buffered packets into flow dicts and emit each one."""
+        """Aggregate buffered packets into flows, attach Kitsune seqs, emit."""
         if not self._pkt_buffer:
             return
 
@@ -390,6 +358,13 @@ class LiveCaptureThread(QThread):
 
         total_bps = 0.0
         for flow in flows:
+            # Attach Kitsune sequence if this src_ip's buffer is full.
+            # The bridge consumes _kitsune_seq for IoT-classified flows.
+            src_ip = flow.get("src_ip", "")
+            buf    = self._kit_buffers.get(src_ip)
+            if buf is not None and len(buf) == KITSUNE_SEQ_LEN:
+                flow["_kitsune_seq"] = np.stack(list(buf))
+
             self.flow_ready.emit(flow)
             self._total_flows += 1
             total_bps += float(flow.get("flow_bytes_per_sec", 0))
@@ -400,25 +375,20 @@ class LiveCaptureThread(QThread):
             "total_flows":    self._total_flows,
         })
 
-    # ── Demo mode ─────────────────────────────────────────────────────────────
+    # ── Demo mode (unchanged) ─────────────────────────────────────────────────
 
     def _run_demo(self) -> None:
-        """
-        Emit realistic-looking flows at ~EMIT_INTERVAL seconds.
-        Used during development and when scapy is unavailable.
-        """
+        """Emit synthetic flows for development without scapy/root."""
         while self._running:
             batch_size = random.randint(1, 3)
             for _ in range(batch_size):
                 flow = dict(random.choice(_DEMO_FLOWS))
-                # Add minor jitter so each emission looks unique
                 flow["total_fwd_bytes"]    = int(flow["total_fwd_bytes"] * random.uniform(0.85, 1.20))
                 flow["flow_pkts_per_sec"]  = flow["flow_pkts_per_sec"]  * random.uniform(0.8, 1.3)
                 flow["flow_bytes_per_sec"] = flow["flow_bytes_per_sec"] * random.uniform(0.8, 1.3)
                 flow["flow_duration"]      = max(0.01, flow["flow_duration"] * random.uniform(0.9, 1.1))
                 self.flow_ready.emit(flow)
                 self._total_flows += 1
-
             self.stats.emit({
                 "flows_per_sec":  batch_size,
                 "bandwidth_kbps": random.randint(80, 600),
@@ -427,30 +397,17 @@ class LiveCaptureThread(QThread):
             time.sleep(self.emit_interval)
 
 
-# ── Packet → flow aggregation (mirrors pcap_parser logic) ─────────────────────
-
-# REPLACEMENT for the _aggregate_packets_to_flows() function in app/live_capture.py
-# (everything from `def _aggregate_packets_to_flows` to end of file)
+# ══════════════════════════════════════════════════════════════════════════════
+# Packet → flow aggregation (Phase A enrichment, unchanged in Phase B)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def _aggregate_packets_to_flows(packets: list[dict]) -> list[dict]:
     """
     Group raw packet dicts into bidirectional 5-tuple flows.
-
-    Phase-A enrichment vs. the original version:
-      Old: 13 fields (basic counters + 4 boolean flags).
-      New: ~30 fields including per-direction packet-length stats (min/max/mean/std),
-           inter-arrival-time stats per direction (mean/std/min/max), header lengths,
-           and integer protocol number compatible with Stage-1's `protocol` feature.
-
-    Field-name conventions match the unified 56-feature schema in
-    models/stage1/classifier.py → ALL_FEATURES, so the bridge's _align() can map
-    them directly.
+    Produces 38 of the 56 unified-schema features per flow.
     """
-    import time
     import statistics
-    from collections import defaultdict
 
-    # ── Pass 1: group packets per 5-tuple, accumulate per-direction lists ──────
     raw: dict[tuple, dict] = {}
 
     for pkt in packets:
@@ -459,26 +416,20 @@ def _aggregate_packets_to_flows(packets: list[dict]) -> list[dict]:
         sp        = int(pkt.get("tcp.srcport") or pkt.get("udp.srcport") or 0)
         dp        = int(pkt.get("tcp.dstport") or pkt.get("udp.dstport") or 0)
         proto_num = int(pkt.get("ip.proto", 0))
-
-        # Canonical 5-tuple key, sorted so both directions share one entry.
         key = tuple(sorted([(src, sp), (dst, dp)])) + (proto_num,)
 
         size  = int(pkt.get("frame.len", 0))
         ts    = float(pkt.get("frame.time_epoch", time.time()))
         flags = int(pkt.get("tcp.flags", 0))
-
-        # Approximate header length: scapy gives full frame.len; we don't have
-        # the parsed L3+L4 header sizes here, so use a typical value (Ethernet 14
-        # + IPv4 20 + TCP 20 = 54). This is a coarse but bounded estimate.
-        hdr_len = 54
+        hdr_len = 54  # rough Eth+IP+TCP estimate
 
         if key not in raw:
             raw[key] = {
                 "src_ip": src, "dst_ip": dst,
                 "src_port": sp, "dst_port": dp,
                 "protocol_num": proto_num,
-                "fwd_sizes": [],   "bwd_sizes": [],
-                "fwd_times": [],   "bwd_times": [],
+                "fwd_sizes": [], "bwd_sizes": [],
+                "fwd_times": [], "bwd_times": [],
                 "all_times": [],
                 "fwd_hdr_total": 0, "bwd_hdr_total": 0,
                 "flag_FIN_count": 0, "flag_SYN_count": 0,
@@ -487,8 +438,7 @@ def _aggregate_packets_to_flows(packets: list[dict]) -> list[dict]:
             }
 
         f = raw[key]
-        is_fwd = (src == f["src_ip"])
-        if is_fwd:
+        if src == f["src_ip"]:
             f["fwd_sizes"].append(size)
             f["fwd_times"].append(ts)
             f["fwd_hdr_total"] += hdr_len
@@ -505,89 +455,60 @@ def _aggregate_packets_to_flows(packets: list[dict]) -> list[dict]:
         if flags & 0x10: f["flag_ACK_count"] += 1
         if flags & 0x20: f["flag_URG_count"] += 1
 
-    # ── Pass 2: derive features per flow ───────────────────────────────────────
-    def _stats(xs: list[float]) -> tuple[float, float, float, float]:
-        """Return (min, max, mean, std). Empty → all zeros."""
-        if not xs:
-            return 0.0, 0.0, 0.0, 0.0
-        if len(xs) == 1:
-            return float(xs[0]), float(xs[0]), float(xs[0]), 0.0
+    def _stats(xs):
+        if not xs: return 0.0, 0.0, 0.0, 0.0
+        if len(xs) == 1: return float(xs[0]), float(xs[0]), float(xs[0]), 0.0
         return (float(min(xs)), float(max(xs)),
                 float(statistics.mean(xs)), float(statistics.pstdev(xs)))
 
-    def _iat_stats(times: list[float]) -> tuple[float, float, float, float]:
-        """Inter-arrival times → (mean, std, min, max). <2 packets → zeros."""
-        if len(times) < 2:
-            return 0.0, 0.0, 0.0, 0.0
-        sorted_t = sorted(times)
-        iats = [sorted_t[i] - sorted_t[i - 1] for i in range(1, len(sorted_t))]
+    def _iat(times):
+        if len(times) < 2: return 0.0, 0.0, 0.0, 0.0
+        ts = sorted(times)
+        iats = [ts[i] - ts[i-1] for i in range(1, len(ts))]
         return (float(statistics.mean(iats)),
                 float(statistics.pstdev(iats)) if len(iats) > 1 else 0.0,
-                float(min(iats)),
-                float(max(iats)))
+                float(min(iats)), float(max(iats)))
 
-    result: list[dict] = []
+    result = []
     for f in raw.values():
-        n_fwd      = len(f["fwd_sizes"])
-        n_bwd      = len(f["bwd_sizes"])
-        n_total    = n_fwd + n_bwd
-        bytes_fwd  = sum(f["fwd_sizes"])
-        bytes_bwd  = sum(f["bwd_sizes"])
-        all_times  = f["all_times"]
-
+        n_fwd = len(f["fwd_sizes"])
+        n_bwd = len(f["bwd_sizes"])
+        bytes_fwd = sum(f["fwd_sizes"])
+        bytes_bwd = sum(f["bwd_sizes"])
+        all_times = f["all_times"]
         first_ts = min(all_times) if all_times else 0.0
         last_ts  = max(all_times) if all_times else 0.0
         duration = max(last_ts - first_ts, 1e-6)
 
         fwd_min, fwd_max, fwd_mean, fwd_std = _stats(f["fwd_sizes"])
         bwd_min, bwd_max, bwd_mean, bwd_std = _stats(f["bwd_sizes"])
-
-        flow_iat_mean, flow_iat_std, flow_iat_min, flow_iat_max = _iat_stats(all_times)
-        fwd_iat_mean,  fwd_iat_std,  fwd_iat_min,  fwd_iat_max  = _iat_stats(f["fwd_times"])
-        bwd_iat_mean,  bwd_iat_std,  bwd_iat_min,  bwd_iat_max  = _iat_stats(f["bwd_times"])
+        flow_iat_mean, flow_iat_std, flow_iat_min, flow_iat_max = _iat(all_times)
+        fwd_iat_mean,  fwd_iat_std,  fwd_iat_min,  fwd_iat_max  = _iat(f["fwd_times"])
+        bwd_iat_mean,  bwd_iat_std,  bwd_iat_min,  bwd_iat_max  = _iat(f["bwd_times"])
 
         result.append({
-            # ── Identity ────────────────────────────────────────────────────────
-            "src_ip":   f["src_ip"],
-            "dst_ip":   f["dst_ip"],
-            "src_port": f["src_port"],
-            "dst_port": f["dst_port"],
-            "protocol": f["protocol_num"],   # NUMERIC (was string in v1) ← Phase-A fix
-
-            # ── Flow-level totals & rates (5 features) ──────────────────────────
+            "src_ip": f["src_ip"], "dst_ip": f["dst_ip"],
+            "src_port": f["src_port"], "dst_port": f["dst_port"],
+            "protocol": f["protocol_num"],
             "flow_duration":      round(duration, 6),
             "total_fwd_packets":  n_fwd,
             "total_bwd_packets":  n_bwd,
             "total_fwd_bytes":    bytes_fwd,
             "total_bwd_bytes":    bytes_bwd,
-
-            # ── Per-direction packet-length stats (8 features) ─ NEW in Phase A ─
-            "fwd_pkt_len_min":  fwd_min,
-            "fwd_pkt_len_max":  fwd_max,
-            "fwd_pkt_len_mean": fwd_mean,
-            "fwd_pkt_len_std":  fwd_std,
-            "bwd_pkt_len_min":  bwd_min,
-            "bwd_pkt_len_max":  bwd_max,
-            "bwd_pkt_len_mean": bwd_mean,
-            "bwd_pkt_len_std":  bwd_std,
-
-            # ── Flow rates (2 features) ─────────────────────────────────────────
+            "fwd_pkt_len_min":  fwd_min, "fwd_pkt_len_max": fwd_max,
+            "fwd_pkt_len_mean": fwd_mean, "fwd_pkt_len_std": fwd_std,
+            "bwd_pkt_len_min":  bwd_min, "bwd_pkt_len_max": bwd_max,
+            "bwd_pkt_len_mean": bwd_mean, "bwd_pkt_len_std": bwd_std,
             "flow_bytes_per_sec": round((bytes_fwd + bytes_bwd) / duration, 2),
-            "flow_pkts_per_sec":  round(n_total / duration, 2),
-
-            # ── IAT stats (12 features) ────────────────────────── NEW in Phase A
+            "flow_pkts_per_sec":  round((n_fwd + n_bwd) / duration, 2),
             "flow_iat_mean": flow_iat_mean, "flow_iat_std": flow_iat_std,
             "flow_iat_min":  flow_iat_min,  "flow_iat_max":  flow_iat_max,
             "fwd_iat_mean":  fwd_iat_mean,  "fwd_iat_std":   fwd_iat_std,
             "fwd_iat_min":   fwd_iat_min,   "fwd_iat_max":   fwd_iat_max,
             "bwd_iat_mean":  bwd_iat_mean,  "bwd_iat_std":   bwd_iat_std,
             "bwd_iat_min":   bwd_iat_min,   "bwd_iat_max":   bwd_iat_max,
-
-            # ── Header lengths (2 features) ─────────────────────── NEW in Phase A
             "fwd_header_length": f["fwd_hdr_total"],
             "bwd_header_length": f["bwd_hdr_total"],
-
-            # ── TCP flag counts (6 features) ──────── NEW: counts (was 0/1 in v1)
             "flag_FIN": f["flag_FIN_count"],
             "flag_SYN": f["flag_SYN_count"],
             "flag_RST": f["flag_RST_count"],

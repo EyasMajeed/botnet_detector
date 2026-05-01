@@ -192,6 +192,34 @@ class Stage2Detector:
             prob = torch.sigmoid(self.model(seq)).item()
         return ("botnet" if prob >= self.threshold else "benign"), float(prob)
 
+    def predict_sequence(self, seq_array: np.ndarray) -> tuple[str, float]:
+        """
+        Run inference on a pre-computed (seq_len, n_features) Kitsune sequence.
+
+        Used by the live monitoring pipeline: live_capture.py maintains a
+        per-src_ip rolling buffer of scaled Kitsune vectors and calls this
+        method once the buffer has seq_len packets.
+
+        Bypasses _align() because Kitsune features have their own column order
+        (FEATURE_NAMES in src/live/kitsune_extractor.py), already matched at
+        training time. Use predict(df) instead for DataFrames with named columns.
+        """
+        if seq_array.ndim != 2:
+            raise ValueError(f"Expected 2-D array, got shape {seq_array.shape}")
+        if seq_array.shape[0] != self.seq_len:
+            raise ValueError(
+                f"Expected seq_len={self.seq_len} rows, got {seq_array.shape[0]}"
+            )
+        if seq_array.shape[1] != self.n_features:
+            raise ValueError(
+                f"Expected n_features={self.n_features} cols, got {seq_array.shape[1]}"
+            )
+
+        seq = torch.tensor(seq_array, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+        with torch.no_grad():
+            prob = torch.sigmoid(self.model(seq)).item()
+        return ("botnet" if prob >= self.threshold else "benign"), float(prob)
+
     def save(self, model_path, meta_path):
         torch.save({"model_state": self.model.state_dict(),
                     "n_features": self.n_features, "seq_len": self.seq_len,

@@ -137,20 +137,36 @@ def run_inference(flow: dict) -> dict:
 def _real_flow_inference(flow: dict) -> dict:
     """
     Real Stage-1 + Stage-2 inference on a single flow dict.
-    Note: with one row, the LSTM sees a length-1 sequence padded to seq_len.
+
+    If the flow carries a `_kitsune_seq` key (numpy array of shape
+    (KITSUNE_SEQ_LEN, 115)) — populated by live_capture.py once a src_ip's
+    Kitsune buffer is full — Stage-2 IoT runs on the real sequence via
+    predict_sequence(). Otherwise Stage-2 IoT is skipped (label="benign",
+    confidence=stage1_conf as a placeholder).
     """
+    # Strip non-feature keys before handing the row to Stage-1.
+    # _kitsune_seq is a numpy array; pandas would choke on it.
+    kitsune_seq = flow.pop("_kitsune_seq", None) if isinstance(flow, dict) else None
+
     df = _normalize_for_stage1(pd.DataFrame([flow]))
 
     stage1 = _get_stage1()
     device_type, stage1_conf = stage1.predict(df)
 
     if device_type == "iot":
-        stage2 = _get_stage2_iot()
-        label, confidence = stage2.predict(df)
+        if kitsune_seq is not None:
+            # Real Stage-2 IoT inference on the actual Kitsune sequence
+            stage2 = _get_stage2_iot()
+            label, confidence = stage2.predict_sequence(kitsune_seq)
+        else:
+            # IoT-classified but Kitsune buffer for this src_ip not yet full.
+            # Defer judgment rather than running on a length-1 padded sequence
+            # that would produce noise.
+            label = "benign"
+            confidence = float(stage1_conf)
     else:
         # TODO (Phase C): wire up Stage-2 Non-IoT CNN-LSTM here.
         #   from models.stage2.noniot_detector_cnnlstm import Stage2Detector as Stage2NonIoTDetector
-        # Until then, non-IoT flows short-circuit to "benign" using Stage-1 conf as a proxy.
         label = "benign"
         confidence = float(stage1_conf)
 
@@ -159,6 +175,7 @@ def _real_flow_inference(flow: dict) -> dict:
         "confidence":  float(confidence),
         "device_type": device_type,
         "stage1_conf": float(stage1_conf),
+        "stage2_ran":  (device_type == "iot" and kitsune_seq is not None),
     }
 
 

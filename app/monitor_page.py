@@ -297,6 +297,7 @@ class MonitorPage(QWidget):
             self._last_latency = 0.0
         else:
             infer = run_inference(flow)
+            print(f"[debug] {flow.get('src_ip')} → {infer.get('label')} "f"(device={infer.get('device_type')}, stage2_ran={infer.get('stage2_ran')})")
             self._last_latency = infer["latency_ms"]
             label      = infer["label"]
             confidence = infer["confidence"]
@@ -377,12 +378,11 @@ class MonitorPage(QWidget):
             self._iface_cb.setCurrentIndex(1)
 
     def _resolve_detector_model(self) -> Optional[str]:
-        return None  # TODO: implement real model path resolution for Stage-2 IoT CNN-LSTM
-        # root = Path(__file__).resolve().parents[1]
-        # model_path = root / "models" / "stage2" / "iot_cnn_lstm.pt"
-        # return str(model_path) if model_path.exists() else None
+        root = Path(__file__).resolve().parents[1]
+        model_path = root / "models" / "stage2" / "iot_cnn_lstm.pt"
+        return str(model_path) if model_path.exists() else None
 
-        # self._iface_cb.blockSignals(False)
+        self._iface_cb.blockSignals(False)
 
     def _on_iface_change(self, idx: int):
         """User selected a different interface / demo mode."""
