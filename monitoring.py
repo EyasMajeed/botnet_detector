@@ -5,22 +5,25 @@
 ╠══════════════════════════════════════════════════════════════════════════════╣
 ║  ARCHITECTURE                                                               ║
 ║                                                                              ║
-║  Every packet → KitsuneExtractor.update()                                   ║
-║                  │ 115-dim raw Kitsune vector                               ║
-║                  ▼                                                           ║
-║          MinMaxScaler (iot_scaler.json)                                     ║
-║                  │ per-src_ip deque(maxlen=IOT_SEQ_LEN)                     ║
-║                  ▼ every INFER_EVERY_PKTS packets                           ║
-║          Stage-2 IoT CNN-LSTM → "botnet"|"benign"                           ║
+║  Every packet (parallel, silent):                                            ║
+║      KitsuneExtractor.update() → MinMaxScaler → per-src_ip deque           ║
+║      (buffer fills continuously; no inference fires here)                   ║
 ║                                                                              ║
-║  On flow completion (FIN/RST/idle):                                          ║
+║  On flow completion (FIN/RST/idle) — Stage-1 gates Stage-2:                ║
 ║      FlowRecord → flow_feature_extractor() → 56-feature dict               ║
 ║               │                                                              ║
 ║          Stage-1 RF  (+ StandardScaler if s1_scaler.json exists)           ║
 ║               │ "iot" | "noniot"                                             ║
-║               ├── "noniot" → stage2_preprocess_non_iot()                   ║
-║               │              → Non-IoT CNN-LSTM                             ║
-║               └── "iot"    → most recent Kitsune inference for src_ip      ║
+║               ├── "iot"    → read Kitsune deque (already filled)           ║
+║               │              → Stage-2 IoT CNN-LSTM → "botnet"|"benign"    ║
+║               └── "noniot" → stage2_preprocess_non_iot()                   ║
+║                              → Stage-2 Non-IoT CNN-LSTM → "botnet"|"benign"║
+║                                                                              ║
+║  WHY KITSUNE STILL RUNS PER-PACKET:                                         ║
+║      Stage-1 fires on flow completion (up to 30s after the first packet).  ║
+║      Kitsune's exponential-decay windows must accumulate continuously or    ║
+║      the buffer is empty at routing time. Kitsune runs silently on every    ║
+║      packet; inference only fires when Stage-1 routes to "iot".            ║
 ║                                                                              ║
 ║  STAGE-1 SCALER NOTE:                                                        ║
 ║  classifier.py trains on an already-normalised CSV (preprocess_from_        ║
@@ -134,7 +137,6 @@ SCALER_S2_NONIOT_LIVE = _ep(
 
 IOT_SEQ_LEN       = 20
 NONIOT_SEQ_LEN    = 20
-INFER_EVERY_PKTS  = 20
 FLOW_IDLE_TIMEOUT = 30.0
 ALERT_COOLDOWN    = 10.0
 MAX_TRACKED_IPS   = 500
@@ -781,31 +783,16 @@ class LiveScalerCalibrator:
 # ══════════════════════════════════════════════════════════════════════════════
 
 class _NonIotCnnLstm(nn.Module if _TORCH_OK else object):
-    """
-    Non-IoT CNN-LSTM architecture — must match noniot_detector_cnnlstm.py exactly.
-    Layer indices verified against checkpoint keys:
-      conv1.0=Conv1d  conv1.1=BatchNorm1d
-      conv2.0=Conv1d  conv2.1=BatchNorm1d
-      lstm (2 layers)
-      head.0=Linear(128,64)  head.1=ReLU  head.2=Dropout  head.3=Linear(64,1)
-    """
     def __init__(self, n_features: int):
         super().__init__()
         self.conv1 = nn.Sequential(
-            nn.Conv1d(n_features, 128, kernel_size=3, padding=1),
-            nn.BatchNorm1d(128),
-            nn.ReLU(),
-            nn.MaxPool1d(kernel_size=2, stride=2),
-        )
+            nn.Conv1d(n_features, 128, 3, padding=1),
+            nn.BatchNorm1d(128), nn.ReLU(), nn.MaxPool1d(2, stride=2))
         self.conv2 = nn.Sequential(
-            nn.Conv1d(128, 256, kernel_size=3, padding=1),
-            nn.BatchNorm1d(256),
-            nn.ReLU(),
-        )
-        self.lstm = nn.LSTM(
-            256, 128, num_layers=2, batch_first=True, dropout=0.3
-        )
-        # Order MUST match checkpoint: Linear → ReLU → Dropout → Linear
+            nn.Conv1d(128, 256, 3, padding=1), nn.BatchNorm1d(256), nn.ReLU())
+        self.lstm = nn.LSTM(256, 128, num_layers=2, batch_first=True, dropout=0.3)
+        # Layer order MUST match checkpoint keys:
+        # head.0=Linear(128,64)  head.1=ReLU  head.2=Dropout  head.3=Linear(64,1)
         self.head = nn.Sequential(
             nn.Linear(128, 64),   # head.0
             nn.ReLU(),            # head.1
@@ -815,8 +802,7 @@ class _NonIotCnnLstm(nn.Module if _TORCH_OK else object):
 
     def forward(self, x):
         x = x.permute(0, 2, 1)
-        x = self.conv1(x)
-        x = self.conv2(x)
+        x = self.conv1(x); x = self.conv2(x)
         x = x.permute(0, 2, 1)
         _, (h, _) = self.lstm(x)
         return self.head(h[-1]).squeeze(1)
@@ -1102,15 +1088,26 @@ class BotnetMonitor:
     """
     Two-stage live botnet detection pipeline.
 
-    PATH A — IoT/Kitsune (per-packet):
-      Every packet: KitsuneExtractor → MinMax scale → per-IP deque →
-      every INFER_EVERY_PKTS: Stage-2 IoT CNN-LSTM on real (SEQ,115) sequence.
+    Stage-1 gates Stage-2 — all inference flows through one path per flow.
 
-    PATH B — Flow-level (per completed flow):
-      FIN/RST/idle: flow_feature_extractor → Stage-1 RF →
-        "iot":    correlate with most recent PATH A result
-        "noniot": stage2_preprocess_non_iot → per-IP flow deque →
-                  Stage-2 Non-IoT CNN-LSTM on sliding (SEQ, n_feat) window.
+    KITSUNE (per-packet, silent):
+        Every packet: KitsuneExtractor → MinMax scale → per-src_ip deque.
+        The buffer fills continuously. No inference fires here.
+        Kitsune must run per-packet because its exponential-decay windows
+        need continuous updates — waiting for Stage-1 would leave the buffer
+        empty at routing time (Stage-1 fires up to 30s after the first packet).
+
+    FLOW COMPLETION (per completed flow):
+        FIN/RST/idle → FlowAggregator → flow_feature_extractor → Stage-1 RF.
+
+        Stage-1 routes to one of two Stage-2 branches:
+
+        "iot"    → read the Kitsune deque already accumulated for src_ip
+                   → Stage-2 IoT CNN-LSTM → "botnet"|"benign"
+                   (one result per completed flow, not per N packets)
+
+        "noniot" → stage2_preprocess_non_iot → per-src_ip flow-row deque
+                   → Stage-2 Non-IoT CNN-LSTM → "botnet"|"benign"
     """
 
     ALERT_MIN_CONF = 0.7
@@ -1134,7 +1131,6 @@ class BotnetMonitor:
 
         self.kitsune     = KitsuneExtractor()
         self._iot_bufs:    Dict[str, deque] = defaultdict(lambda: deque(maxlen=IOT_SEQ_LEN))
-        self._iot_pkt_cnt: Dict[str, int]   = defaultdict(int)
         self._noniot_bufs: Dict[str, deque] = defaultdict(lambda: deque(maxlen=NONIOT_SEQ_LEN))
         self.aggregator  = FlowAggregator()
 
@@ -1159,7 +1155,10 @@ class BotnetMonitor:
                        src_mac: str = "", tcp_flags: int = 0) -> Optional[DetectionResult]:
         self._stats["packets"] += 1
 
-        # PATH A: Kitsune per-packet
+        # ── Kitsune: silent per-packet accumulation ───────────────────────────
+        # Runs on every packet regardless of device type. No inference fires
+        # here. The buffer fills continuously so it is ready when Stage-1
+        # routes a completed flow to the "iot" branch.
         proto_str = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(proto, "OTHER")
         raw_kit = self.kitsune.update(
             timestamp=timestamp, src_mac=src_mac or src_ip,
@@ -1169,34 +1168,11 @@ class BotnetMonitor:
         )
         scaled_kit = self.s2_iot.stage2_preprocess_iot(raw_kit)
         self._iot_bufs[src_ip].append(scaled_kit)
-        self._iot_pkt_cnt[src_ip] += 1
 
-        iot_result = None
-        buf = self._iot_bufs[src_ip]
-        if len(buf) == IOT_SEQ_LEN and self._iot_pkt_cnt[src_ip] % INFER_EVERY_PKTS == 0:
-            t0 = time.perf_counter()
-            seq = np.stack(list(buf))   # real temporal sequence, NOT tiled
-            label, conf = self.s2_iot.stage2_predict(seq)
-            lat_ms = (time.perf_counter() - t0) * 1000
-            alerted = self._maybe_alert(src_ip, label, conf, timestamp, "iot")
-            self._stats["botnet" if label == "botnet" else "benign"] += 1
-            iot_result = DetectionResult(
-                flow_id=f"kitsune_{src_ip}_{int(timestamp)}",
-                src_ip=src_ip, dst_ip=dst_ip, device_type="iot", label=label,
-                s1_confidence=0.0, s2_confidence=round(conf, 4),
-                suspicion_score=0.0, latency_ms=round(lat_ms, 2),
-                alerted=alerted, timestamp=timestamp,
-            )
-            self._results.append(iot_result)
-            log.debug("  [IoT-S2] %-18s label=%-7s conf=%.3f lat=%.1fms",
-                      src_ip, label, conf, lat_ms)
-
-        # PATH B: flow aggregation
+        # ── Flow aggregation: fires inference on completion via _process_flow ─
         completed = self.aggregator.process_packet(
             timestamp, src_ip, dst_ip, src_port, dst_port, proto, pkt_len, ttl, tcp_flags)
-        flow_result = self._process_flow(completed) if completed else None
-
-        return flow_result or iot_result
+        return self._process_flow(completed) if completed else None
 
     def flush_idle_flows(self) -> List[DetectionResult]:
         results = []
@@ -1211,6 +1187,7 @@ class BotnetMonitor:
         self._stats["flows_completed"] += 1
         src_ip = rec.key.ip_lo
 
+        # ── Feature extraction & suspicion scoring ────────────────────────────
         wcount, wdsts = self.aggregator.window_stats(src_ip)
         feat = flow_feature_extractor(rec, wcount, wdsts)
 
@@ -1219,16 +1196,26 @@ class BotnetMonitor:
             self._stats["suspicious_flows"] += 1
             log.info("  [!] Suspicious flow %s (score=%.1f)", str(rec.key), susp)
 
+        # ── Stage-1: IoT vs Non-IoT routing ──────────────────────────────────
         device_type, s1_conf = self.s1.stage1_predict(feat)
 
+        # ── Stage-2: gated by Stage-1 result ─────────────────────────────────
         if device_type == "iot":
+            # Read the Kitsune buffer that has been filling silently per-packet.
+            # Inference fires here — once per completed flow — not on a packet
+            # counter. If the buffer is not yet full (fewer than IOT_SEQ_LEN
+            # packets seen from this IP), we defer and return no result.
             self._stats["iot"] += 1
-            label, s2_conf = "unknown", 0.0
             buf = self._iot_bufs[src_ip]
-            if len(buf) == IOT_SEQ_LEN:
-                seq = np.stack(list(buf))
-                label, s2_conf = self.s2_iot.stage2_predict(seq)
-        else:
+            if len(buf) < IOT_SEQ_LEN:
+                log.debug("  [IoT] %-18s Kitsune buffer not full yet (%d/%d) — deferring",
+                          src_ip, len(buf), IOT_SEQ_LEN)
+                return None
+            seq = np.stack(list(buf))   # (IOT_SEQ_LEN, 115) — real temporal sequence
+            label, s2_conf = self.s2_iot.stage2_predict(seq)
+
+        else:  # "noniot"
+            # Append this flow's feature row to the sliding window and infer.
             self._stats["noniot"] += 1
             row = self.s2_noniot.stage2_preprocess_non_iot(feat)
             self._noniot_bufs[src_ip].append(row)
