@@ -118,7 +118,7 @@ def _ep(var: str, default: Path) -> Path:
     return Path(os.environ.get(var, str(default)))
 
 ROOT            = _HERE
-MODEL_S1_RF     = _ep("MODEL_S1_RF",    ROOT / "models/stage1/rl_model.json")
+MODEL_S1_RF     = _ep("MODEL_S1_RF",    ROOT / "models/stage1/rf_model.pkl")
 SCALER_S1_JSON  = _ep("SCALER_S1_JSON", ROOT / "models/stage1/s1_scaler.json")
 MODEL_S2_IOT    = _ep("MODEL_S2_IOT",   ROOT / "models/stage2/iot_cnn_lstm.pt")
 SCALER_S2_IOT   = _ep("SCALER_S2_IOT",  ROOT / "models/stage2/iot_scaler.json")
