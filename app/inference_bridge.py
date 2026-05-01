@@ -1,43 +1,49 @@
 """
 inference_bridge.py  —  Single integration point for ML inference
 ==================================================================
-This is the ONLY file that needs to change when the preprocessing
-pipeline and trained models are ready.
+Two public entry points used by the GUI:
 
-Current state: STUB — returns plausible random results so the
-monitoring UI works end-to-end today.
+    run_inference(flow_dict)        — single live flow (from monitor_page.py)
+    run_file_inference(file_info)   — uploaded file (from upload_page.py)
 
-Integration checklist (for the preprocessing team):
-    1. Implement _real_inference() below
-    2. Flip USE_REAL_INFERENCE = True
-    3. Done — the rest of the app is untouched
+Both go through Stage-1 (RF) and the Stage-2 IoT CNN-LSTM when
+USE_REAL_INFERENCE is True. Non-IoT flows currently short-circuit to
+"benign" because the Non-IoT detector is wired up in Phase C — see TODO.
 
-Flow dict keys expected by the real pipeline (all 56 features):
-    See src/preprocessing_pipeline/config.py  →  ALL_FEATURES
+Feature list reference: models/stage1/classifier.py → ALL_FEATURES (56).
 """
 
 from __future__ import annotations
+
 import random
+import sys
 import time
+from pathlib import Path
 from typing import Any
 
-import sys
-from pathlib import Path
 import pandas as pd
 
+# Make project root importable so `models.*` resolves regardless of CWD.
 ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 
 from models.stage1.classifier import Stage1Classifier
-from models.stage2.iot_detector import Stage2Detector
+from models.stage2.iot_detector import Stage2Detector as Stage2IoTDetector
 from file_handler import FileFormat
 
-# ── Model loading ─────────────────────────────────────────────────────────────
-_MODEL_PATH_S1 = ROOT / "models" / "stage1" / "rf_model.pkl"
-_MODEL_PATH_S2 = ROOT / "models" / "stage2" / "iot_cnn_lstm.pt"
 
+# ── Model paths ───────────────────────────────────────────────────────────────
+_MODEL_PATH_S1     = ROOT / "models" / "stage1" / "rf_model.pkl"
+_MODEL_PATH_S2_IOT = ROOT / "models" / "stage2" / "iot_cnn_lstm.pt"
+
+# ── Flip to False to use the random stub instead of the trained models ────────
+USE_REAL_INFERENCE = True
+
+
+# ── Lazy singletons ───────────────────────────────────────────────────────────
 _stage1: Stage1Classifier | None = None
-_stage2: Stage2Detector | None = None
+_stage2_iot: Stage2IoTDetector | None = None
+
 
 def _get_stage1() -> Stage1Classifier:
     global _stage1
@@ -45,39 +51,82 @@ def _get_stage1() -> Stage1Classifier:
         _stage1 = Stage1Classifier.load(_MODEL_PATH_S1)
     return _stage1
 
-def _get_stage2() -> Stage2Detector:
-    global _stage2
-    if _stage2 is None:
-        _stage2 = Stage2Detector.load(_MODEL_PATH_S2)
-    return _stage2
 
-# ── Flip this when the real pipeline is ready ─────────────────────────────────
-USE_REAL_INFERENCE = True
+def _get_stage2_iot() -> Stage2IoTDetector:
+    global _stage2_iot
+    if _stage2_iot is None:
+        _stage2_iot = Stage2IoTDetector.load(_MODEL_PATH_S2_IOT)
+    return _stage2_iot
 
 
-# ── Public API ─────────────────────────────────────────────────────────────────
+# ══════════════════════════════════════════════════════════════════════════════
+# Phase-A feature normalisation — coerces live-flow dicts into the unified schema
+# ══════════════════════════════════════════════════════════════════════════════
+
+# Minimal protocol-string → number mapping. Matches process_ctu13.py PROTO_MAP
+# and pcap_to_csv.py conventions used at training time.
+_PROTO_MAP = {
+    "tcp": 6, "udp": 17, "icmp": 1, "arp": 0, "igmp": 2,
+    "esp": 50, "gre": 47, "ipv6-icmp": 58, "icmpv6": 58,
+    "unknown": 0, "": 0, "none": 0, "other": 0,
+}
+
+
+def _coerce_protocol(value) -> int:
+    """Map 'TCP'/'tcp'/6/'6'/None → an integer protocol number for the RF."""
+    if value is None:
+        return 0
+    if isinstance(value, (int, float)):
+        return int(value)
+    s = str(value).strip().lower()
+    if s.isdigit():
+        return int(s)
+    return _PROTO_MAP.get(s, 0)
+
+
+def _normalize_for_stage1(df: pd.DataFrame) -> pd.DataFrame:
+    """
+    Make a DataFrame safe to feed into Stage1Classifier.predict().
+
+    Specifically:
+      1. Coerce 'protocol' from string ('TCP', 'UDP', ...) to integer.
+      2. Coerce any object-dtype feature column to numeric (NaN → 0).
+      3. Leave missing features alone — Stage1Classifier._align() zero-fills them.
+    """
+    df = df.copy()
+
+    if "protocol" in df.columns:
+        df["protocol"] = df["protocol"].apply(_coerce_protocol)
+
+    # Anything still object-typed (e.g. 'tcp_state' as a string) → numeric or 0.
+    for col in df.columns:
+        if df[col].dtype == object and col not in ("src_ip", "dst_ip", "timestamp"):
+            df[col] = pd.to_numeric(df[col], errors="coerce").fillna(0)
+
+    return df
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# Public API #1 — single live flow (called by monitor_page.py per packet group)
+# ══════════════════════════════════════════════════════════════════════════════
 
 def run_inference(flow: dict) -> dict:
     """
-    Run Stage-1 + Stage-2 inference on a single flow dict.
-
-    Args:
-        flow:  Raw flow dictionary from LiveCaptureThread or pcap_parser.
-               The bridge handles feature alignment internally.
+    Run Stage-1 + Stage-2 inference on a single flow dict from live capture.
 
     Returns:
         {
             "label":       "botnet" | "benign",
-            "confidence":  float  in [0.0, 1.0],
-            "device_type": "iot"  | "noniot",
-            "stage1_conf": float,   # IoT vs Non-IoT confidence
-            "latency_ms":  float,   # wall-clock inference time
+            "confidence":  float in [0.0, 1.0],
+            "device_type": "iot" | "noniot",
+            "stage1_conf": float,
+            "latency_ms":  float,
         }
     """
     t0 = time.perf_counter()
 
     if USE_REAL_INFERENCE:
-        result = run_file_inference(flow)
+        result = _real_flow_inference(flow)
     else:
         result = _stub_inference(flow)
 
@@ -85,110 +134,128 @@ def run_inference(flow: dict) -> dict:
     return result
 
 
-# ── Stub (active now) ──────────────────────────────────────────────────────────
+def _real_flow_inference(flow: dict) -> dict:
+    """
+    Real Stage-1 + Stage-2 inference on a single flow dict.
+    Note: with one row, the LSTM sees a length-1 sequence padded to seq_len.
+    """
+    df = _normalize_for_stage1(pd.DataFrame([flow]))
+
+    stage1 = _get_stage1()
+    device_type, stage1_conf = stage1.predict(df)
+
+    if device_type == "iot":
+        stage2 = _get_stage2_iot()
+        label, confidence = stage2.predict(df)
+    else:
+        # TODO (Phase C): wire up Stage-2 Non-IoT CNN-LSTM here.
+        #   from models.stage2.noniot_detector_cnnlstm import Stage2Detector as Stage2NonIoTDetector
+        # Until then, non-IoT flows short-circuit to "benign" using Stage-1 conf as a proxy.
+        label = "benign"
+        confidence = float(stage1_conf)
+
+    return {
+        "label":       label,
+        "confidence":  float(confidence),
+        "device_type": device_type,
+        "stage1_conf": float(stage1_conf),
+    }
+
 
 def _stub_inference(flow: dict) -> dict:
     """
-    Realistic-looking random results for UI development.
-    Botnet probability is influenced by suspicion score so the
-    demo feels coherent with the scorer output.
+    Demo stub — returns plausible-looking random results.
+    Used when USE_REAL_INFERENCE is False (UI development without trained models).
     """
-    # Use dst_port as a weak heuristic to make stub feel realistic
     dst = int(flow.get("dst_port", 0) or 0)
     BOTNET_PORTS = {4444, 9999, 6667, 31337, 2323, 23}
     base_botnet_prob = 0.65 if dst in BOTNET_PORTS else 0.15
 
-    is_botnet   = random.random() < base_botnet_prob
-    device_iot  = random.random() < 0.45
-    confidence  = round(random.uniform(0.72, 0.99), 3)
-    stage1_conf = round(random.uniform(0.80, 0.99), 3)
+    is_botnet  = random.random() < base_botnet_prob
+    device_iot = random.random() < 0.45
 
     return {
         "label":       "botnet" if is_botnet else "benign",
-        "confidence":  confidence,
+        "confidence":  round(random.uniform(0.72, 0.99), 3),
         "device_type": "iot" if device_iot else "noniot",
-        "stage1_conf": stage1_conf,
+        "stage1_conf": round(random.uniform(0.80, 0.99), 3),
     }
 
 
+# ══════════════════════════════════════════════════════════════════════════════
+# Public API #2 — uploaded file (called by upload_page.py)
+# ══════════════════════════════════════════════════════════════════════════════
+
+_SUPPORTED_FILE_FORMATS = (
+    FileFormat.CSV_UNIFIED,
+    FileFormat.CSV_GENERIC,
+    FileFormat.CSV_CICFLOW,
+    FileFormat.CSV_CTU13,
+    FileFormat.CSV_UNSW,
+    FileFormat.NETFLOW_CSV,
+)
+
+
 def run_file_inference(info: Any) -> list[dict[str, Any]]:
-    """Run inference on an uploaded file using Stage-1 model."""
+    """
+    Run inference on every row of an uploaded CSV file.
+
+    Args:
+        info: FileInfo object from app.file_handler.load_file().
+
+    Returns:
+        List of per-row result dicts (same schema as run_inference()).
+    """
     if not getattr(info, "is_valid", False):
         raise ValueError("Cannot run inference on an invalid file.")
-    
-    # Load file as DataFrame
-    if info.format not in (
-        FileFormat.CSV_UNIFIED,
-        FileFormat.CSV_GENERIC,
-        FileFormat.CSV_CICFLOW,
-        FileFormat.CSV_CTU13,
-        FileFormat.CSV_UNSW,
-        FileFormat.NETFLOW_CSV,
-    ):
+
+    if info.format not in _SUPPORTED_FILE_FORMATS:
         raise ValueError(
             f"Unsupported file format for inference: {info.format}. "
             "Only CSV flow exports are supported."
         )
-    
+
     try:
         df = pd.read_csv(info.path, low_memory=False)
     except Exception as exc:
         raise RuntimeError(f"Failed to read CSV for inference: {exc}") from exc
-    
+
     if df.empty:
         raise ValueError("CSV file contains no data rows.")
-    
-    # Run Stage-1 on the entire DataFrame
+
+    df = _normalize_for_stage1(df)
+
     t0 = time.perf_counter()
     stage1 = _get_stage1()
     device_types, stage1_confs = stage1.predict(df)
-    
-    # For now, assume all are benign if not IoT (no Stage-2 for non-IoT)
-    results = []
+
+    # Stage1Classifier.predict returns scalars for a 1-row DataFrame and lists
+    # for multi-row. Normalise to lists so the loop below is uniform.
+    if isinstance(device_types, str):
+        device_types = [device_types]
+        stage1_confs = [stage1_confs]
+
+    results: list[dict[str, Any]] = []
     for i, (dt, conf) in enumerate(zip(device_types, stage1_confs)):
         if dt == "iot":
-            # Would need Stage-2 here, but for simplicity, mark as unknown
-            label = "unknown"  # Since Stage-2 is only for IoT
-            confidence = 0.5
+            # Stage-2 IoT works per-row via the seq_len-pad trick in its predict().
+            stage2 = _get_stage2_iot()
+            label, confidence = stage2.predict(df.iloc[[i]])
         else:
+            # TODO (Phase C): wire up Stage-2 Non-IoT CNN-LSTM here.
             label = "benign"
-            confidence = 0.95
-        
+            confidence = float(conf)
+
         results.append({
-            "row": i + 1,
+            "row":         i + 1,
             "device_type": dt,
-            "label": label,
-            "confidence": float(confidence),
+            "label":       label,
+            "confidence":  float(confidence),
             "stage1_conf": float(conf),
         })
-    
+
     latency = round((time.perf_counter() - t0) * 1000, 2)
     for result in results:
         result["latency_ms"] = latency
-    
+
     return results
-    """
-    Real inference using Stage-1 and Stage-2 models.
-    """
-    # Convert flow dict to DataFrame
-    df = pd.DataFrame([flow])
-    
-    # Stage-1: IoT vs Non-IoT
-    stage1 = _get_stage1()
-    device_type, stage1_conf = stage1.predict(df)
-    
-    # Stage-2: Botnet detection (only for IoT flows)
-    if device_type == "iot":
-        stage2 = _get_stage2()
-        label, confidence = stage2.predict(df)
-    else:
-        # For non-IoT, assume benign (no Stage-2 model for non-IoT yet)
-        label = "benign"
-        confidence = 0.95  # High confidence for benign non-IoT
-    
-    return {
-        "label": label,
-        "confidence": float(confidence),
-        "device_type": device_type,
-        "stage1_conf": float(stage1_conf),
-    }

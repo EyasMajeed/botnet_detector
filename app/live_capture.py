@@ -429,78 +429,171 @@ class LiveCaptureThread(QThread):
 
 # ── Packet → flow aggregation (mirrors pcap_parser logic) ─────────────────────
 
+# REPLACEMENT for the _aggregate_packets_to_flows() function in app/live_capture.py
+# (everything from `def _aggregate_packets_to_flows` to end of file)
+
 def _aggregate_packets_to_flows(packets: list[dict]) -> list[dict]:
     """
     Group raw packet dicts into bidirectional 5-tuple flows.
-    Produces the same keys as pcap_parser.aggregate_packets_to_flows.
+
+    Phase-A enrichment vs. the original version:
+      Old: 13 fields (basic counters + 4 boolean flags).
+      New: ~30 fields including per-direction packet-length stats (min/max/mean/std),
+           inter-arrival-time stats per direction (mean/std/min/max), header lengths,
+           and integer protocol number compatible with Stage-1's `protocol` feature.
+
+    Field-name conventions match the unified 56-feature schema in
+    models/stage1/classifier.py → ALL_FEATURES, so the bridge's _align() can map
+    them directly.
     """
-    flows: dict[tuple, dict] = {}
+    import time
+    import statistics
+    from collections import defaultdict
+
+    # ── Pass 1: group packets per 5-tuple, accumulate per-direction lists ──────
+    raw: dict[tuple, dict] = {}
 
     for pkt in packets:
-        src  = pkt.get("ip.src", "")
-        dst  = pkt.get("ip.dst", "")
-        sp   = int(pkt.get("tcp.srcport") or pkt.get("udp.srcport") or 0)
-        dp   = int(pkt.get("tcp.dstport") or pkt.get("udp.dstport") or 0)
+        src       = pkt.get("ip.src", "")
+        dst       = pkt.get("ip.dst", "")
+        sp        = int(pkt.get("tcp.srcport") or pkt.get("udp.srcport") or 0)
+        dp        = int(pkt.get("tcp.dstport") or pkt.get("udp.dstport") or 0)
         proto_num = int(pkt.get("ip.proto", 0))
-        proto = {6: "TCP", 17: "UDP"}.get(proto_num, str(proto_num))
 
-        # Canonical key: sort src/dst so both directions share one entry
-        key = tuple(sorted([(src, sp), (dst, dp)])) + (proto,)
+        # Canonical 5-tuple key, sorted so both directions share one entry.
+        key = tuple(sorted([(src, sp), (dst, dp)])) + (proto_num,)
 
         size  = int(pkt.get("frame.len", 0))
         ts    = float(pkt.get("frame.time_epoch", time.time()))
         flags = int(pkt.get("tcp.flags", 0))
 
-        if key not in flows:
-            flows[key] = {
-                "src_ip":             src,
-                "dst_ip":             dst,
-                "src_port":           sp,
-                "dst_port":           dp,
-                "protocol":           proto,
-                "total_fwd_bytes":    0,
-                "total_bwd_bytes":    0,
-                "total_fwd_packets":  0,
-                "total_bwd_packets":  0,
-                "flow_duration":      0.0,
-                "flow_pkts_per_sec":  0.0,
-                "flow_bytes_per_sec": 0.0,
-                "flag_SYN":           0,
-                "flag_ACK":           0,
-                "flag_FIN":           0,
-                "flag_RST":           0,
-                "_first_ts":          ts,
-                "_last_ts":           ts,
+        # Approximate header length: scapy gives full frame.len; we don't have
+        # the parsed L3+L4 header sizes here, so use a typical value (Ethernet 14
+        # + IPv4 20 + TCP 20 = 54). This is a coarse but bounded estimate.
+        hdr_len = 54
+
+        if key not in raw:
+            raw[key] = {
+                "src_ip": src, "dst_ip": dst,
+                "src_port": sp, "dst_port": dp,
+                "protocol_num": proto_num,
+                "fwd_sizes": [],   "bwd_sizes": [],
+                "fwd_times": [],   "bwd_times": [],
+                "all_times": [],
+                "fwd_hdr_total": 0, "bwd_hdr_total": 0,
+                "flag_FIN_count": 0, "flag_SYN_count": 0,
+                "flag_RST_count": 0, "flag_PSH_count": 0,
+                "flag_ACK_count": 0, "flag_URG_count": 0,
             }
 
-        f = flows[key]
+        f = raw[key]
         is_fwd = (src == f["src_ip"])
         if is_fwd:
-            f["total_fwd_bytes"]   += size
-            f["total_fwd_packets"] += 1
+            f["fwd_sizes"].append(size)
+            f["fwd_times"].append(ts)
+            f["fwd_hdr_total"] += hdr_len
         else:
-            f["total_bwd_bytes"]   += size
-            f["total_bwd_packets"] += 1
+            f["bwd_sizes"].append(size)
+            f["bwd_times"].append(ts)
+            f["bwd_hdr_total"] += hdr_len
+        f["all_times"].append(ts)
 
-        f["_last_ts"] = max(f["_last_ts"], ts)
+        if flags & 0x01: f["flag_FIN_count"] += 1
+        if flags & 0x02: f["flag_SYN_count"] += 1
+        if flags & 0x04: f["flag_RST_count"] += 1
+        if flags & 0x08: f["flag_PSH_count"] += 1
+        if flags & 0x10: f["flag_ACK_count"] += 1
+        if flags & 0x20: f["flag_URG_count"] += 1
 
-        # TCP flag accumulation
-        if flags & 0x02: f["flag_SYN"] = 1
-        if flags & 0x10: f["flag_ACK"] = 1
-        if flags & 0x01: f["flag_FIN"] = 1
-        if flags & 0x04: f["flag_RST"] = 1
+    # ── Pass 2: derive features per flow ───────────────────────────────────────
+    def _stats(xs: list[float]) -> tuple[float, float, float, float]:
+        """Return (min, max, mean, std). Empty → all zeros."""
+        if not xs:
+            return 0.0, 0.0, 0.0, 0.0
+        if len(xs) == 1:
+            return float(xs[0]), float(xs[0]), float(xs[0]), 0.0
+        return (float(min(xs)), float(max(xs)),
+                float(statistics.mean(xs)), float(statistics.pstdev(xs)))
 
-    # ── Compute derived fields and strip internal keys ─────────────────────
-    result = []
-    for f in flows.values():
-        duration = max(f["_last_ts"] - f["_first_ts"], 1e-6)
-        total_pkts  = f["total_fwd_packets"] + f["total_bwd_packets"]
-        total_bytes = f["total_fwd_bytes"]   + f["total_bwd_bytes"]
-        f["flow_duration"]      = round(duration, 6)
-        f["flow_pkts_per_sec"]  = round(total_pkts  / duration, 2)
-        f["flow_bytes_per_sec"] = round(total_bytes / duration, 2)
-        del f["_first_ts"]
-        del f["_last_ts"]
-        result.append(f)
+    def _iat_stats(times: list[float]) -> tuple[float, float, float, float]:
+        """Inter-arrival times → (mean, std, min, max). <2 packets → zeros."""
+        if len(times) < 2:
+            return 0.0, 0.0, 0.0, 0.0
+        sorted_t = sorted(times)
+        iats = [sorted_t[i] - sorted_t[i - 1] for i in range(1, len(sorted_t))]
+        return (float(statistics.mean(iats)),
+                float(statistics.pstdev(iats)) if len(iats) > 1 else 0.0,
+                float(min(iats)),
+                float(max(iats)))
+
+    result: list[dict] = []
+    for f in raw.values():
+        n_fwd      = len(f["fwd_sizes"])
+        n_bwd      = len(f["bwd_sizes"])
+        n_total    = n_fwd + n_bwd
+        bytes_fwd  = sum(f["fwd_sizes"])
+        bytes_bwd  = sum(f["bwd_sizes"])
+        all_times  = f["all_times"]
+
+        first_ts = min(all_times) if all_times else 0.0
+        last_ts  = max(all_times) if all_times else 0.0
+        duration = max(last_ts - first_ts, 1e-6)
+
+        fwd_min, fwd_max, fwd_mean, fwd_std = _stats(f["fwd_sizes"])
+        bwd_min, bwd_max, bwd_mean, bwd_std = _stats(f["bwd_sizes"])
+
+        flow_iat_mean, flow_iat_std, flow_iat_min, flow_iat_max = _iat_stats(all_times)
+        fwd_iat_mean,  fwd_iat_std,  fwd_iat_min,  fwd_iat_max  = _iat_stats(f["fwd_times"])
+        bwd_iat_mean,  bwd_iat_std,  bwd_iat_min,  bwd_iat_max  = _iat_stats(f["bwd_times"])
+
+        result.append({
+            # ── Identity ────────────────────────────────────────────────────────
+            "src_ip":   f["src_ip"],
+            "dst_ip":   f["dst_ip"],
+            "src_port": f["src_port"],
+            "dst_port": f["dst_port"],
+            "protocol": f["protocol_num"],   # NUMERIC (was string in v1) ← Phase-A fix
+
+            # ── Flow-level totals & rates (5 features) ──────────────────────────
+            "flow_duration":      round(duration, 6),
+            "total_fwd_packets":  n_fwd,
+            "total_bwd_packets":  n_bwd,
+            "total_fwd_bytes":    bytes_fwd,
+            "total_bwd_bytes":    bytes_bwd,
+
+            # ── Per-direction packet-length stats (8 features) ─ NEW in Phase A ─
+            "fwd_pkt_len_min":  fwd_min,
+            "fwd_pkt_len_max":  fwd_max,
+            "fwd_pkt_len_mean": fwd_mean,
+            "fwd_pkt_len_std":  fwd_std,
+            "bwd_pkt_len_min":  bwd_min,
+            "bwd_pkt_len_max":  bwd_max,
+            "bwd_pkt_len_mean": bwd_mean,
+            "bwd_pkt_len_std":  bwd_std,
+
+            # ── Flow rates (2 features) ─────────────────────────────────────────
+            "flow_bytes_per_sec": round((bytes_fwd + bytes_bwd) / duration, 2),
+            "flow_pkts_per_sec":  round(n_total / duration, 2),
+
+            # ── IAT stats (12 features) ────────────────────────── NEW in Phase A
+            "flow_iat_mean": flow_iat_mean, "flow_iat_std": flow_iat_std,
+            "flow_iat_min":  flow_iat_min,  "flow_iat_max":  flow_iat_max,
+            "fwd_iat_mean":  fwd_iat_mean,  "fwd_iat_std":   fwd_iat_std,
+            "fwd_iat_min":   fwd_iat_min,   "fwd_iat_max":   fwd_iat_max,
+            "bwd_iat_mean":  bwd_iat_mean,  "bwd_iat_std":   bwd_iat_std,
+            "bwd_iat_min":   bwd_iat_min,   "bwd_iat_max":   bwd_iat_max,
+
+            # ── Header lengths (2 features) ─────────────────────── NEW in Phase A
+            "fwd_header_length": f["fwd_hdr_total"],
+            "bwd_header_length": f["bwd_hdr_total"],
+
+            # ── TCP flag counts (6 features) ──────── NEW: counts (was 0/1 in v1)
+            "flag_FIN": f["flag_FIN_count"],
+            "flag_SYN": f["flag_SYN_count"],
+            "flag_RST": f["flag_RST_count"],
+            "flag_PSH": f["flag_PSH_count"],
+            "flag_ACK": f["flag_ACK_count"],
+            "flag_URG": f["flag_URG_count"],
+        })
 
     return result
