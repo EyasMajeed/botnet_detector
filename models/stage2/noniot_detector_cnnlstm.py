@@ -454,6 +454,35 @@ class Stage2Detector:
             prob = torch.sigmoid(self.model(seq)).item()
         return ("botnet" if prob >= self.threshold else "benign"), float(prob)
 
+    def predict_sequence(self, seq_array: np.ndarray) -> tuple[str, float]:
+        """
+        Run inference on a pre-scaled (seq_len, n_features) flow sequence.
+
+        Used by the live monitoring pipeline: live_capture.py maintains a
+        per-src_ip rolling buffer of completed flow dicts and, once the buffer
+        has seq_len entries, scales them with noniot_scaler.json and passes
+        the resulting array here.
+
+        Bypasses _align() because the caller has already mapped its source
+        feature dicts onto self.feature_cols. Use predict(df) instead for
+        DataFrames with named columns that need alignment.
+        """
+        if seq_array.ndim != 2:
+            raise ValueError(f"Expected 2-D array, got shape {seq_array.shape}")
+        if seq_array.shape[0] != self.seq_len:
+            raise ValueError(
+                f"Expected seq_len={self.seq_len} rows, got {seq_array.shape[0]}"
+            )
+        if seq_array.shape[1] != self.n_features:
+            raise ValueError(
+                f"Expected n_features={self.n_features} cols, got {seq_array.shape[1]}"
+            )
+
+        seq = torch.tensor(seq_array, dtype=torch.float32).unsqueeze(0).to(DEVICE)
+        with torch.no_grad():
+            prob = torch.sigmoid(self.model(seq)).item()
+        return ("botnet" if prob >= self.threshold else "benign"), float(prob)
+
     def save(self, mp, mtp):
         torch.save({"model_state": self.model.state_dict(),
                     "seq_len": self.seq_len, "n_features": self.n_features,
@@ -466,7 +495,7 @@ class Stage2Detector:
 
     @classmethod
     def load(cls, mp):
-        ck = torch.load(mp, map_location=DEVICE)
+        ck = torch.load(mp, map_location=DEVICE, weights_only=False)
         m  = CnnLstmDetector(ck["n_features"]).to(DEVICE)
         m.load_state_dict(ck["model_state"])
         return cls(m, ck["seq_len"], ck["n_features"], ck["threshold"],

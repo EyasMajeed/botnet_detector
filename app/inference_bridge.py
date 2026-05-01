@@ -29,12 +29,14 @@ sys.path.insert(0, str(ROOT))
 
 from models.stage1.classifier import Stage1Classifier
 from models.stage2.iot_detector import Stage2Detector as Stage2IoTDetector
+from models.stage2.noniot_detector_cnnlstm import Stage2Detector as Stage2NonIoTDetector
 from file_handler import FileFormat
 
 
 # ── Model paths ───────────────────────────────────────────────────────────────
-_MODEL_PATH_S1     = ROOT / "models" / "stage1" / "rf_model.pkl"
-_MODEL_PATH_S2_IOT = ROOT / "models" / "stage2" / "iot_cnn_lstm.pt"
+_MODEL_PATH_S1        = ROOT / "models" / "stage1" / "rf_model.pkl"
+_MODEL_PATH_S2_IOT    = ROOT / "models" / "stage2" / "iot_cnn_lstm.pt"
+_MODEL_PATH_S2_NONIOT = ROOT / "models" / "stage2" / "noniot_cnn_lstm.pt"
 
 # ── Flip to False to use the random stub instead of the trained models ────────
 USE_REAL_INFERENCE = True
@@ -43,6 +45,7 @@ USE_REAL_INFERENCE = True
 # ── Lazy singletons ───────────────────────────────────────────────────────────
 _stage1: Stage1Classifier | None = None
 _stage2_iot: Stage2IoTDetector | None = None
+_stage2_noniot: Stage2NonIoTDetector | None = None
 
 
 def _get_stage1() -> Stage1Classifier:
@@ -57,6 +60,13 @@ def _get_stage2_iot() -> Stage2IoTDetector:
     if _stage2_iot is None:
         _stage2_iot = Stage2IoTDetector.load(_MODEL_PATH_S2_IOT)
     return _stage2_iot
+
+
+def _get_stage2_noniot() -> Stage2NonIoTDetector:
+    global _stage2_noniot
+    if _stage2_noniot is None:
+        _stage2_noniot = Stage2NonIoTDetector.load(_MODEL_PATH_S2_NONIOT)
+    return _stage2_noniot
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -138,44 +148,51 @@ def _real_flow_inference(flow: dict) -> dict:
     """
     Real Stage-1 + Stage-2 inference on a single flow dict.
 
-    If the flow carries a `_kitsune_seq` key (numpy array of shape
-    (KITSUNE_SEQ_LEN, 115)) — populated by live_capture.py once a src_ip's
-    Kitsune buffer is full — Stage-2 IoT runs on the real sequence via
-    predict_sequence(). Otherwise Stage-2 IoT is skipped (label="benign",
-    confidence=stage1_conf as a placeholder).
+    Two optional sequence keys may be attached by live_capture.py:
+      _kitsune_seq : (KITSUNE_SEQ_LEN, 115) numpy array — for Stage-2 IoT
+      _noniot_seq  : (NONIOT_SEQ_LEN, 48)   numpy array — for Stage-2 Non-IoT
+
+    Each is consumed only when the corresponding device_type from Stage-1
+    routes to it. If the appropriate sequence is absent (buffer warming up),
+    the result falls back to Stage-1 confidence as a placeholder.
     """
     # Strip non-feature keys before handing the row to Stage-1.
-    # _kitsune_seq is a numpy array; pandas would choke on it.
+    # Sequence arrays are numpy and would confuse pandas; pop both.
     kitsune_seq = flow.pop("_kitsune_seq", None) if isinstance(flow, dict) else None
+    noniot_seq  = flow.pop("_noniot_seq",  None) if isinstance(flow, dict) else None
 
     df = _normalize_for_stage1(pd.DataFrame([flow]))
 
     stage1 = _get_stage1()
     device_type, stage1_conf = stage1.predict(df)
 
+    stage2_ran = False
+
     if device_type == "iot":
         if kitsune_seq is not None:
-            # Real Stage-2 IoT inference on the actual Kitsune sequence
             stage2 = _get_stage2_iot()
             label, confidence = stage2.predict_sequence(kitsune_seq)
+            stage2_ran = True
         else:
             # IoT-classified but Kitsune buffer for this src_ip not yet full.
-            # Defer judgment rather than running on a length-1 padded sequence
-            # that would produce noise.
             label = "benign"
             confidence = float(stage1_conf)
-    else:
-        # TODO (Phase C): wire up Stage-2 Non-IoT CNN-LSTM here.
-        #   from models.stage2.noniot_detector_cnnlstm import Stage2Detector as Stage2NonIoTDetector
-        label = "benign"
-        confidence = float(stage1_conf)
+    else:  # device_type == "noniot"
+        if noniot_seq is not None:
+            stage2 = _get_stage2_noniot()
+            label, confidence = stage2.predict_sequence(noniot_seq)
+            stage2_ran = True
+        else:
+            # Non-IoT-classified but flow buffer for this src_ip not yet full.
+            label = "benign"
+            confidence = float(stage1_conf)
 
     return {
         "label":       label,
         "confidence":  float(confidence),
         "device_type": device_type,
         "stage1_conf": float(stage1_conf),
-        "stage2_ran":  (device_type == "iot" and kitsune_seq is not None),
+        "stage2_ran":  stage2_ran,
     }
 
 
@@ -259,9 +276,13 @@ def run_file_inference(info: Any) -> list[dict[str, Any]]:
             stage2 = _get_stage2_iot()
             label, confidence = stage2.predict(df.iloc[[i]])
         else:
-            # TODO (Phase C): wire up Stage-2 Non-IoT CNN-LSTM here.
-            label = "benign"
-            confidence = float(conf)
+            # Stage-2 Non-IoT — for uploaded files we don't have a pre-built
+            # per-src_ip rolling buffer, so we call its single-row predict()
+            # which zero-pads to seq_len. This is less accurate than the
+            # rolling-buffer path used in live monitoring, but better than
+            # short-circuiting every flow to "benign".
+            stage2 = _get_stage2_noniot()
+            label, confidence = stage2.predict(df.iloc[[i]])
 
         results.append({
             "row":         i + 1,

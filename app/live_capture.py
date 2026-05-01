@@ -73,10 +73,14 @@ except ImportError:
 # ── Constants ─────────────────────────────────────────────────────────────────
 EMIT_INTERVAL    = 2.0     # seconds between flow flushes
 PACKET_BUFFER    = 50      # max packets buffered before forced flush
-KITSUNE_SEQ_LEN  = 20      # rows per src_ip buffer (matches iot_cnn_lstm.pt training)
+KITSUNE_SEQ_LEN  = 20      # rows per src_ip Kitsune buffer (matches iot_cnn_lstm.pt training)
+NONIOT_SEQ_LEN   = 20      # rows per src_ip flow buffer (matches noniot_cnn_lstm.pt training)
 PREF_IFACES      = ("wi-fi", "wlan", "en0", "en1", "eth0", "ethernet")
 
-IOT_SCALER_PATH = ROOT / "models" / "stage2" / "iot_scaler.json"
+IOT_SCALER_PATH       = ROOT / "models" / "stage2" / "iot_scaler.json"
+NONIOT_MODEL_PATH     = ROOT / "models" / "stage2" / "noniot_cnn_lstm.pt"
+NONIOT_SCALER_PATH    = ROOT / "models" / "stage2" / "noniot_scaler.json"
+NONIOT_METADATA_PATH  = ROOT / "models" / "stage2" / "noniot_metadata.json"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -155,6 +159,68 @@ class _KitsuneScaler:
         return np.clip(scaled, 0.0, 1.0).astype(np.float32)
 
 
+class _NoniotScaler:
+    """
+    Wraps noniot_scaler.json to scale flow dicts into the (n_features,) array
+    layout expected by Stage-2 Non-IoT predict_sequence().
+
+    The non-IoT model was trained on MinMaxScaler-normalized data; this class
+    applies the same scaling at inference time. Features absent from the live
+    flow dict (e.g. payload_entropy, ttl_*) scale to 0 — matching the model's
+    expectation of those columns being present but empty.
+
+    Scaler JSON has 49 feature entries; the model expects 48. We use the
+    model's feature_cols as the source of truth and look up min/max by name.
+    """
+
+    def __init__(self, scaler_path: Path, feature_cols: list[str]):
+        with open(scaler_path) as f:
+            data = json.load(f)
+
+        scaler_features = data["features"]
+        scaler_min = np.array(data["data_min"], dtype=np.float32)
+        scaler_max = np.array(data["data_max"], dtype=np.float32)
+
+        # Build a per-feature lookup. Features the scaler doesn't know (rare —
+        # would mean model was retrained without re-saving scaler) get min=0,
+        # max=1 (passthrough).
+        idx_by_name = {name: i for i, name in enumerate(scaler_features)}
+        n_feat = len(feature_cols)
+        self.feat_min = np.zeros(n_feat, dtype=np.float32)
+        self.feat_max = np.ones(n_feat,  dtype=np.float32)
+        self.feature_cols = list(feature_cols)
+        unknown = []
+        for i, name in enumerate(feature_cols):
+            j = idx_by_name.get(name)
+            if j is None:
+                unknown.append(name)
+                continue
+            self.feat_min[i] = scaler_min[j]
+            self.feat_max[i] = scaler_max[j]
+        self._unknown = unknown
+
+        self.range = self.feat_max - self.feat_min
+        self.range[self.range == 0.0] = 1.0  # constant features → passthrough
+
+    def scale_flows(self, flow_dicts: list[dict]) -> np.ndarray:
+        """
+        Build a (len(flow_dicts), n_features) array, scaled to [0, 1] by MinMax.
+        Missing keys in a flow dict are treated as 0.
+        """
+        n_rows = len(flow_dicts)
+        n_feat = len(self.feature_cols)
+        raw = np.zeros((n_rows, n_feat), dtype=np.float32)
+        for r, flow in enumerate(flow_dicts):
+            for c, name in enumerate(self.feature_cols):
+                v = flow.get(name, 0.0)
+                try:
+                    raw[r, c] = float(v)
+                except (TypeError, ValueError):
+                    raw[r, c] = 0.0
+        scaled = (raw - self.feat_min) / self.range
+        return np.clip(scaled, 0.0, 1.0).astype(np.float32)
+
+
 # ══════════════════════════════════════════════════════════════════════════════
 # Demo flows (unchanged)
 # ══════════════════════════════════════════════════════════════════════════════
@@ -217,6 +283,13 @@ class LiveCaptureThread(QThread):
         )
         self._kitsune_enabled = False
 
+        # Phase C state — per-src_ip flow buffer for Stage-2 Non-IoT
+        self._noniot_scaler: Optional[_NoniotScaler] = None
+        self._flow_buffers: dict[str, deque] = defaultdict(
+            lambda: deque(maxlen=NONIOT_SEQ_LEN)
+        )
+        self._noniot_enabled = False
+
         if enable_kitsune and not demo_mode and KITSUNE_AVAILABLE:
             try:
                 if not IOT_SCALER_PATH.exists():
@@ -231,6 +304,27 @@ class LiveCaptureThread(QThread):
                 # Stage-1 still runs and the user sees flows.
                 self._kitsune_enabled = False
                 self._kitsune_init_error = str(e)
+
+        # Phase C — load Non-IoT scaler. Independent of Kitsune setup; can fail
+        # without affecting Stage-1 or Stage-2 IoT.
+        if not demo_mode:
+            try:
+                if not NONIOT_SCALER_PATH.exists():
+                    raise FileNotFoundError(
+                        f"Non-IoT scaler not found at {NONIOT_SCALER_PATH}"
+                    )
+                if not NONIOT_METADATA_PATH.exists():
+                    raise FileNotFoundError(
+                        f"Non-IoT metadata not found at {NONIOT_METADATA_PATH}"
+                    )
+                with open(NONIOT_METADATA_PATH) as f:
+                    meta = json.load(f)
+                feat_cols = meta["feature_cols"]
+                self._noniot_scaler = _NoniotScaler(NONIOT_SCALER_PATH, feat_cols)
+                self._noniot_enabled = True
+            except Exception as e:
+                self._noniot_enabled = False
+                self._noniot_init_error = str(e)
 
         self._running     = False
         self._pkt_buffer: list[dict] = []
@@ -250,6 +344,15 @@ class LiveCaptureThread(QThread):
             self.error.emit(
                 f"Stage-2 IoT disabled: {err}. "
                 "Stage-1 device classification will still run."
+            )
+
+        # Same for Non-IoT scaler — if it failed to load, Stage-2 Non-IoT
+        # will be skipped and flows will fall back to Stage-1 confidence only.
+        if (not self.demo_mode) and (not self._noniot_enabled):
+            err = getattr(self, "_noniot_init_error", "Non-IoT scaler disabled")
+            self.error.emit(
+                f"Stage-2 Non-IoT disabled: {err}. "
+                "Non-IoT flows will report Stage-1 confidence only."
             )
 
         if self.demo_mode:
@@ -349,7 +452,7 @@ class LiveCaptureThread(QThread):
             self._last_emit = now
 
     def _flush_buffer(self) -> None:
-        """Aggregate buffered packets into flows, attach Kitsune seqs, emit."""
+        """Aggregate buffered packets into flows, attach sequences, emit."""
         if not self._pkt_buffer:
             return
 
@@ -358,12 +461,28 @@ class LiveCaptureThread(QThread):
 
         total_bps = 0.0
         for flow in flows:
-            # Attach Kitsune sequence if this src_ip's buffer is full.
-            # The bridge consumes _kitsune_seq for IoT-classified flows.
             src_ip = flow.get("src_ip", "")
-            buf    = self._kit_buffers.get(src_ip)
-            if buf is not None and len(buf) == KITSUNE_SEQ_LEN:
-                flow["_kitsune_seq"] = np.stack(list(buf))
+
+            # ── Stage-2 IoT: attach Kitsune sequence if this src_ip's buffer is full
+            kit = self._kit_buffers.get(src_ip)
+            if kit is not None and len(kit) == KITSUNE_SEQ_LEN:
+                flow["_kitsune_seq"] = np.stack(list(kit))
+
+            # ── Stage-2 Non-IoT: append flow to per-src_ip flow buffer, then
+            # if the buffer is now full, scale the rolling window and attach.
+            # We use a copy of the flow dict (without internal _* keys) so the
+            # Kitsune sequence object isn't held in the deque.
+            if self._noniot_enabled and src_ip:
+                flow_for_buf = {k: v for k, v in flow.items() if not k.startswith("_")}
+                self._flow_buffers[src_ip].append(flow_for_buf)
+                buf = self._flow_buffers[src_ip]
+                if len(buf) == NONIOT_SEQ_LEN:
+                    try:
+                        flow["_noniot_seq"] = self._noniot_scaler.scale_flows(list(buf))
+                    except Exception:
+                        # Scaling failure shouldn't break the emission. Drop silently;
+                        # Stage-2 Non-IoT just won't fire for this flow.
+                        pass
 
             self.flow_ready.emit(flow)
             self._total_flows += 1
