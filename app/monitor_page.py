@@ -377,11 +377,12 @@ class MonitorPage(QWidget):
             self._iface_cb.setCurrentIndex(1)
 
     def _resolve_detector_model(self) -> Optional[str]:
-        root = Path(__file__).resolve().parents[1]
-        model_path = root / "models" / "stage2" / "iot_cnn_lstm.pt"
-        return str(model_path) if model_path.exists() else None
+        return None  # TODO: implement real model path resolution for Stage-2 IoT CNN-LSTM
+        # root = Path(__file__).resolve().parents[1]
+        # model_path = root / "models" / "stage2" / "iot_cnn_lstm.pt"
+        # return str(model_path) if model_path.exists() else None
 
-        self._iface_cb.blockSignals(False)
+        # self._iface_cb.blockSignals(False)
 
     def _on_iface_change(self, idx: int):
         """User selected a different interface / demo mode."""
