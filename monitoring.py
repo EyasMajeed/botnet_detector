@@ -118,7 +118,7 @@ def _ep(var: str, default: Path) -> Path:
     return Path(os.environ.get(var, str(default)))
 
 ROOT            = _HERE
-MODEL_S1_RF     = _ep("MODEL_S1_RF",    ROOT / "models/stage1/rf_model.pkl")
+MODEL_S1_RF     = _ep("MODEL_S1_RF",    ROOT / "models/stage1/rl_model.json")
 SCALER_S1_JSON  = _ep("SCALER_S1_JSON", ROOT / "models/stage1/s1_scaler.json")
 MODEL_S2_IOT    = _ep("MODEL_S2_IOT",   ROOT / "models/stage2/iot_cnn_lstm.pt")
 SCALER_S2_IOT   = _ep("SCALER_S2_IOT",  ROOT / "models/stage2/iot_scaler.json")
@@ -447,25 +447,72 @@ class Stage1Classifier:
     """
 
     def __init__(self, model_path: Path, scaler_path: Optional[Path] = None):
-        # ── Load RF + LabelEncoder (required) ─────────────────────────────
+        # ── Load model (RF pickle OR XGBoost portable JSON) ──────────────
         if not model_path.exists():
             raise FileNotFoundError(
-                f"Stage-1 RF model missing: {model_path}\n"
+                f"Stage-1 model missing: {model_path}\n"
                 "Train it with: python3 models/stage1/classifier.py"
             )
-        with open(model_path, "rb") as f:
-            saved = pickle.load(f)
 
-        if isinstance(saved, dict):
-            self._rf = saved["model"]
-            # Prefer the LabelEncoder stored alongside the RF so we get the
-            # original string classes ("iot", "noniot") rather than the
-            # encoded integers (0, 1) that live in rf.classes_.
-            self._le = saved.get("label_encoder", None)
+        # Auto-detect format by file suffix:
+        #   .json  → XGBoost portable format (cross-platform-safe)
+        #   .pkl   → RandomForest pickle (default, sklearn-portable)
+        is_xgb_json = str(model_path).lower().endswith(".json")
+
+        if is_xgb_json:
+            # ── XGBoost portable load (avoids macOS segfault) ───────────
+            # Companion meta pickle holds: LabelEncoder, feature_names,
+            # init_params for XGBClassifier reconstruction.
+            meta_path = model_path.with_name(
+                model_path.stem + "_meta.pkl"
+            )
+            if not meta_path.exists():
+                raise FileNotFoundError(
+                    f"Stage-1 XGBoost meta pickle missing: {meta_path}\n"
+                    "It must sit next to the .json file. "
+                    "Re-run classifier.py to regenerate both."
+                )
+
+            with open(meta_path, "rb") as f:
+                meta = pickle.load(f)
+
+            try:
+                from xgboost import XGBClassifier
+            except ImportError as e:
+                raise ImportError(
+                    "[Stage1] XGBoost JSON model detected but xgboost "
+                    "package is not installed. Install with: pip install xgboost"
+                ) from e
+
+            # Reconstruct the XGBClassifier with original training params,
+            # then load the Booster state from the portable JSON.
+            init_params = meta.get("init_params", {})
+            xgb = XGBClassifier(**init_params)
+            xgb.load_model(str(model_path))
+            xgb._le = None  # internal sklearn-XGBoost compat shim
+
+            # Force n_classes_ so sklearn-style predict_proba works
+            xgb.n_classes_ = meta.get("n_classes", 2)
+            xgb.classes_   = np.arange(xgb.n_classes_)
+
+            self._rf = xgb
+            self._le = meta.get("label_encoder", None)
+            log.info("[Stage1] XGBoost loaded from portable JSON: %s", model_path)
         else:
-            # Legacy pkl that is the bare RF object itself
-            self._rf = saved
-            self._le = None
+            # ── RandomForest pickle load (legacy default path) ──────────
+            with open(model_path, "rb") as f:
+                saved = pickle.load(f)
+
+            if isinstance(saved, dict):
+                self._rf = saved["model"]
+                # Prefer the LabelEncoder stored alongside the RF so we get the
+                # original string classes ("iot", "noniot") rather than the
+                # encoded integers (0, 1) that live in rf.classes_.
+                self._le = saved.get("label_encoder", None)
+            else:
+                # Legacy pkl that is the bare RF object itself
+                self._rf = saved
+                self._le = None
 
         if self._le is not None:
             # le.classes_ is ["iot", "noniot"] (the original string labels)
