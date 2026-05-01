@@ -32,6 +32,10 @@ from models.stage1.classifier import Stage1Classifier
 from models.stage2.iot_detector import Stage2Detector
 from file_handler import FileFormat
 
+from src.xai import ExplainerBundle, explain_flow
+_xai_bundle: ExplainerBundle | None = None
+
+
 # ── Model loading ─────────────────────────────────────────────────────────────
 _MODEL_PATH_S1 = ROOT / "models" / "stage1" / "rf_model.pkl"
 _MODEL_PATH_S2 = ROOT / "models" / "stage2" / "iot_cnn_lstm.pt"
@@ -143,30 +147,30 @@ def run_file_inference(info: Any) -> list[dict[str, Any]]:
     stage1 = _get_stage1()
     device_types, stage1_confs = stage1.predict(df)
     
-    # For now, assume all are benign if not IoT (no Stage-2 for non-IoT)
-    results = []
-    for i, (dt, conf) in enumerate(zip(device_types, stage1_confs)):
-        if dt == "iot":
-            # Would need Stage-2 here, but for simplicity, mark as unknown
-            label = "unknown"  # Since Stage-2 is only for IoT
-            confidence = 0.5
-        else:
-            label = "benign"
-            confidence = 0.95
+    # # For now, assume all are benign if not IoT (no Stage-2 for non-IoT)
+    # results = []
+    # for i, (dt, conf) in enumerate(zip(device_types, stage1_confs)):
+    #     if dt == "iot":
+    #         # Would need Stage-2 here, but for simplicity, mark as unknown
+    #         label = "unknown"  # Since Stage-2 is only for IoT
+    #         confidence = 0.5
+    #     else:
+    #         label = "benign"
+    #         confidence = 0.95
         
-        results.append({
-            "row": i + 1,
-            "device_type": dt,
-            "label": label,
-            "confidence": float(confidence),
-            "stage1_conf": float(conf),
-        })
+    #     results.append({
+    #         "row": i + 1,
+    #         "device_type": dt,
+    #         "label": label,
+    #         "confidence": float(confidence),
+    #         "stage1_conf": float(conf),
+    #     })
     
-    latency = round((time.perf_counter() - t0) * 1000, 2)
-    for result in results:
-        result["latency_ms"] = latency
+    # latency = round((time.perf_counter() - t0) * 1000, 2)
+    # for result in results:
+    #     result["latency_ms"] = latency
     
-    return results
+    # return results
     """
     Real inference using Stage-1 and Stage-2 models.
     """
@@ -185,10 +189,39 @@ def run_file_inference(info: Any) -> list[dict[str, Any]]:
         # For non-IoT, assume benign (no Stage-2 model for non-IoT yet)
         label = "benign"
         confidence = 0.95  # High confidence for benign non-IoT
-    
+
+    if label != "benign":  # only explain detections, save compute on benign
+        try:
+            xai = explain_flow(
+                flow_df       = df_window,    # the window passed to Stage-2
+                stage1_label  = device_type,  # "iot" | "noniot"
+                stage2_label  = label,
+                bundle        = _get_xai_bundle(),
+                top_k         = 8,
+            )
+        except Exception as e:
+            # Don't let XAI errors break detection — log and continue
+            print(f"  [XAI] Warning: explanation failed: {e}")
+            xai = None
+    else:
+        xai = None
+
     return {
         "label": label,
         "confidence": float(confidence),
         "device_type": device_type,
         "stage1_conf": float(stage1_conf),
+        "xai":          xai,
     }
+
+def _get_xai_bundle() -> ExplainerBundle:
+    global _xai_bundle
+    if _xai_bundle is None:
+        _xai_bundle = ExplainerBundle(
+            stage1_classifier = _get_stage1(),
+            iot_detector      = _get_stage2(),     # your existing IoT loader
+            noniot_detector   = None,              # add when you have one
+        )
+    return _xai_bundle
+
+

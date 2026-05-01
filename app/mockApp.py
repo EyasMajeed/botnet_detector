@@ -230,7 +230,7 @@ class Sidebar(QWidget):
         ic=QLabel("🛡"); ic.setFont(QFont(FNT,22)); ic.setStyleSheet(f"color:{ACC};background:transparent;")
         lh.addWidget(ic)
         tc=QVBoxLayout(); tc.setSpacing(0)
-        tc.addWidget(L("BotDetect",13,bold=True)); tc.addWidget(L("AI Security Suite",9,color=TD))
+        tc.addWidget(L("BotSense",13,bold=True)); tc.addWidget(L("AI Security Suite",9,color=TD))
         lh.addLayout(tc); lh.addStretch(); root.addWidget(logo)
         # Nav
         nav=QWidget(); nav.setStyleSheet("background:transparent;")
