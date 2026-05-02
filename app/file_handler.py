@@ -116,7 +116,7 @@ class FileInfo:
             FileFormat.UNKNOWN:     "❓",
         }
         return icons.get(self.format, "📄")
-
+ 
     @property
     def ready_for_inference(self) -> bool:
         """True when the inference bridge can accept this file."""

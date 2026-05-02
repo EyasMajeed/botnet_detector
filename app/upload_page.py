@@ -34,11 +34,15 @@ from PyQt6.QtWidgets import (
 from file_handler   import load_file, FileInfo, FileFormat
 from inference_bridge import run_inference, run_file_inference
 
-# ── Design tokens (must match mockApp.py) ─────────────────────────────────────
-BG   = "#1E1E2F";  CARD = "#16161F";  BDR = "#374151"
-TW   = "#FFFFFF";  TG   = "#9CA3AF";  TD  = "#6B7280"
-ACC  = "#3A7AFE";  OK   = "#10B981";  ERR = "#EF4444"
-WARN = "#F97316";  YEL  = "#EAB308";  FNT = "Segoe UI"
+# ── Design tokens (single source of truth: app/theme.py) ─────────────────────
+# The page used to hardcode its own slightly-off palette
+# (BG=#1E1E2F vs theme BG=#0A0E1A, ACC=#3A7AFE vs theme ACC=#3FA9F5),
+# which is why this page looked subtly different from Dashboard / Results /
+# Reports / Settings. Import the same tokens those pages do.
+from theme import (
+    BG, CARD, BDR, TW, TG, TD,
+    ACC, OK, ERR, WARN, YEL, FNT,
+)
 
 ACCEPT_FILTER = (
     "Network Traffic Files "
@@ -357,12 +361,8 @@ class UploadPage(QWidget):
         root.setContentsMargins(24, 24, 24, 24)
         root.setSpacing(18)
 
-        # ── Page title ────────────────────────────────────────────────────
-        root.addWidget(_lbl("Upload & Analyze", 20, bold=True))
-        root.addWidget(_lbl(
-            "Upload a traffic capture file for AI-based botnet detection.",
-            12, color=TD
-        ))
+        # ── Page title (18pt bold — matches every other page) ─────────────
+        root.addWidget(_lbl("Upload & Analyze", 18, bold=True))
 
         # ── Drop zone ─────────────────────────────────────────────────────
         self._drop_zone = DropZone()

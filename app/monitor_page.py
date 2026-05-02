@@ -36,9 +36,18 @@ from PyQt6.QtWidgets import (
     QComboBox, QCheckBox,
 )
 
+
 from live_capture      import LiveCaptureThread, get_interfaces, SCAPY_AVAILABLE
 from suspicion_scorer  import SuspicionScorer
 from inference_bridge  import run_inference
+
+try:
+    from monitor_bridge import BotnetMonitorThread, MONITOR_AVAILABLE
+except Exception:
+    BotnetMonitorThread = None
+    MONITOR_AVAILABLE   = False
+
+from detection_store import DetectionFlow
 
 # ── Design tokens (must match mockApp.py) ─────────────────────────────────────
 BG   = "#1E1E2F";  CARD = "#16161F";  BDR = "#374151"
@@ -98,12 +107,16 @@ class MonitorPage(QWidget):
         hideEvent  — auto-stop capture when page is hidden
     """
 
-    def __init__(self, parent=None):
+    def __init__(self, store=None, settings=None, parent=None):
         super().__init__(parent)
         self.setStyleSheet(f"background:{BG};")
 
+        # Shared services (may be None when run standalone for dev)
+        self.store    = store
+        self.settings = settings
+
         # State
-        self._running      = True
+        self._running      = False     # was True — auto-start logic depends on this
         self._t0           = datetime.now()
         self._total_flows  = 0
         self._alert_count  = 0
@@ -111,9 +124,16 @@ class MonitorPage(QWidget):
         self._last_latency = 0.0
 
         # Core components (not started yet)
-        self._scorer  = SuspicionScorer()
-        self._model_path = self._resolve_detector_model()
-        self._thread  = LiveCaptureThread(model_path=self._model_path)
+        self._scorer       = SuspicionScorer()
+        self._model_path   = self._resolve_detector_model()
+        # Prefer the full Stage-1 + Stage-2 pipeline when monitoring.py and
+        # all model artifacts are loadable; fall back to the legacy
+        # LiveCaptureThread (DETECTOR/LIVE/DEMO) otherwise.
+        self._use_monitor  = MONITOR_AVAILABLE and BotnetMonitorThread is not None
+        if self._use_monitor:
+            self._thread = BotnetMonitorThread()
+        else:
+            self._thread = LiveCaptureThread(model_path=self._model_path)
         self._thread.flow_ready.connect(self._on_flow)
         self._thread.stats.connect(self._on_stats)
         self._thread.error.connect(self._on_error)
@@ -227,8 +247,31 @@ class MonitorPage(QWidget):
         self._table.setShowGrid(False)
         self._table.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self._table.setStyleSheet(_table_css())
-        self._table.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+
+        # Per-column sizing so short fields (Time, Protocol, Score…) don't get
+        # the same width as long IP:port pairs. Only Src IP and Dst IP stretch
+        # to absorb extra horizontal space — every other column is fixed-width.
+        h = self._table.horizontalHeader()
+        h.setStretchLastSection(False)
+        for col, mode, w in [
+            (0, QHeaderView.ResizeMode.Fixed,    80),   # Time      08:14:22
+            (1, QHeaderView.ResizeMode.Stretch,   0),   # Src IP    192.168.100.151:54012
+            (2, QHeaderView.ResizeMode.Stretch,   0),   # Dst IP    8.8.8.8:443
+            (3, QHeaderView.ResizeMode.Fixed,    70),   # Protocol  TCP / UDP / ICMP
+            (4, QHeaderView.ResizeMode.Fixed,    80),   # Label     Botnet / Benign
+            (5, QHeaderView.ResizeMode.Fixed,    90),   # Confidence 12.34%
+            (6, QHeaderView.ResizeMode.Fixed,    80),   # Device    NONIOT / IOT
+            (7, QHeaderView.ResizeMode.Fixed,    70),   # Score     🔴 0
+            (8, QHeaderView.ResizeMode.Fixed,    80),   # Sniff?    🔴 Yes / —
+        ]:
+            h.setSectionResizeMode(col, mode)
+            if w:
+                self._table.setColumnWidth(col, w)
         self._table.verticalHeader().setDefaultSectionSize(34)
+
+        # Right-align numeric columns so digits line up vertically.
+        # (We do this once on the header here; cell-level alignment is set in
+        #  _add_row when each item is created.)
         tv.addWidget(self._table)
         root.addWidget(tc)
 
@@ -241,6 +284,24 @@ class MonitorPage(QWidget):
     def start_capture(self):
         if self._running:
             return
+
+        # If using BotnetMonitorThread, build the BotnetMonitor in THIS (main)
+        # thread before start(). torch.load() segfaults from worker threads on
+        # macOS when PyQt6 is loaded — main-thread construction is the only
+        # reliable path. First click blocks for ~3-5s while 3 models load.
+        if hasattr(self._thread, "ensure_monitor"):
+            self._tog_btn.setEnabled(False)
+            self._status_lbl.setText("● Loading detection models…")
+            self._status_lbl.setStyleSheet(f"color:{TG};background:transparent;")
+            from PyQt6.QtWidgets import QApplication
+            QApplication.processEvents()                # paint the status text
+            ok = self._thread.ensure_monitor()
+            self._tog_btn.setEnabled(True)
+            if not ok:
+                self._on_error(getattr(self._thread, "_init_error",
+                                       "BotnetMonitor init failed"))
+                return
+
         self._running = True
         self._t0      = datetime.now()
         self._scorer.reset_baseline()
@@ -261,16 +322,20 @@ class MonitorPage(QWidget):
         self._status_lbl.setStyleSheet(f"color:{TG};background:transparent;")
 
     # ── Qt lifecycle ──────────────────────────────────────────────────────────
+    ''' uncomment the following if u want the live monitoring stops when u switch to another page,
+     and restarts when u switch back.'''
 
-    def showEvent(self, event):
-        super().showEvent(event)
-        # Auto-start when page becomes visible the first time
-        if not self._running and self._total_flows == 0:
-            self.start_capture()
 
-    def hideEvent(self, event):
-        super().hideEvent(event)
-        self.stop_capture()
+    # def showEvent(self, event):
+    #     super().showEvent(event)
+    #     # Auto-start when page becomes visible the first time
+    #     if not self._running and self._total_flows == 0:
+    #         self.start_capture()
+
+    # def hideEvent(self, event):
+    #     super().hideEvent(event)
+    #     self.stop_capture()
+
 
     # ── Slots ─────────────────────────────────────────────────────────────────
 
@@ -293,8 +358,13 @@ class MonitorPage(QWidget):
         if "_label" in flow:
             label      = flow.get("_label", "benign")
             confidence = float(flow.get("_botnet_prob", 0.0))
-            device     = "iot" if flow.get("_alert") else "noniot"
-            self._last_latency = 0.0
+            # Trust _device_type from the bridge; fall back to alert-flag heuristic
+            # only for legacy LiveCaptureThread DETECTOR-mode flows that lack it.
+            device     = flow.get(
+                "_device_type",
+                "iot" if flow.get("_alert") else "noniot",
+            )
+            self._last_latency = float(flow.get("_latency_ms", 0.0))
         else:
             infer = run_inference(flow)
             self._last_latency = infer["latency_ms"]
@@ -308,6 +378,27 @@ class MonitorPage(QWidget):
             self._alert_count += 1
         if trigger_sniff:
             self._sniff_count += 1
+
+        # 3b. Push to the shared store so Dashboard / Results / Reports update.
+        if self.store is not None:
+            try:
+                self.store.add_live_flow(DetectionFlow(
+                    src_ip        = str(flow.get("src_ip", "")),
+                    dst_ip        = str(flow.get("dst_ip", "")),
+                    src_port      = int(flow.get("src_port", 0) or 0),
+                    dst_port      = int(flow.get("dst_port", 0) or 0),
+                    protocol      = str(flow.get("protocol", "—")),
+                    label         = label,
+                    confidence    = confidence,
+                    device_type   = device,
+                    s1_confidence = float(flow.get("_s1_confidence", 0.0)),
+                    suspicion     = float(flow.get("_suspicion", score)),
+                    latency_ms    = self._last_latency,
+                    alerted       = bool(flow.get("_alert", False)),
+                ))
+            except Exception as _e:
+                # Never let a store hiccup kill live capture.
+                pass
 
         # 4. Apply filter
         filt = self._filter_cb.currentText()
@@ -359,29 +450,32 @@ class MonitorPage(QWidget):
             self._stat_labels[lbl].setText(val)
 
     def _populate_interfaces(self):
-        """Fill the interface dropdown with real interfaces + a Demo option."""
-        self._iface_cb.blockSignals(True)
-        self._iface_cb.clear()
-        self._iface_cb.addItem("🔴  Demo Mode (simulated)", userData=None)
+            """Fill the interface dropdown with real interfaces + a Demo option."""
+            self._iface_cb.blockSignals(True)
+            self._iface_cb.clear()
+            self._iface_cb.addItem("🔴  Demo Mode (simulated)", userData=None)
 
-        ifaces = get_interfaces()
-        for name, ip in ifaces:
-            self._iface_cb.addItem(f"📡  {name}  ({ip})", userData=name)
+            ifaces = get_interfaces()
+            for name, ip in ifaces:
+                self._iface_cb.addItem(f"📡  {name}  ({ip})", userData=name)
 
-        if not ifaces and not SCAPY_AVAILABLE:
-            self._iface_cb.addItem("⚠  Scapy not installed — Demo only", userData=None)
-        elif not ifaces:
-            self._iface_cb.addItem("⚠  No interfaces found — run setup_live_capture.py", userData=None)
-        else:
-            # Default to first real interface (index 1, since index 0 is Demo)
-            self._iface_cb.setCurrentIndex(1)
+            if not ifaces and not SCAPY_AVAILABLE:
+                self._iface_cb.addItem("⚠  Scapy not installed — Demo only", userData=None)
+            elif not ifaces:
+                self._iface_cb.addItem("⚠  No interfaces found — run setup_live_capture.py", userData=None)
+            else:
+                # Default to first real interface (index 1, since index 0 is Demo)
+                self._iface_cb.setCurrentIndex(1)
+            # ── BUG FIX ────────────────────────────────────────────────────────
+            # blockSignals(False) was previously orphaned inside
+            # _resolve_detector_model() after a return — unreachable. The combo
+            # box stayed permanently muted, so changing the interface did nothing.
+            self._iface_cb.blockSignals(False)
 
     def _resolve_detector_model(self) -> Optional[str]:
         root = Path(__file__).resolve().parents[1]
         model_path = root / "models" / "stage2" / "iot_cnn_lstm.pt"
         return str(model_path) if model_path.exists() else None
-
-        self._iface_cb.blockSignals(False)
 
     def _on_iface_change(self, idx: int):
         """User selected a different interface / demo mode."""
@@ -393,8 +487,13 @@ class MonitorPage(QWidget):
         self._thread.stats.disconnect()
         self._thread.error.disconnect()
         if iface is None:
+            # Demo mode is always served by LiveCaptureThread
             self._thread = LiveCaptureThread(demo_mode=True)
+        elif self._use_monitor:
+            # Full Stage-1 + Stage-2 pipeline on a real interface
+            self._thread = BotnetMonitorThread(interface=iface)
         else:
+            # Legacy fallback (single-stage detector or plain scapy)
             self._thread = LiveCaptureThread(
                 interface=iface,
                 model_path=self._model_path,
@@ -444,9 +543,26 @@ class MonitorPage(QWidget):
 
         r = self._table.rowCount()
         self._table.insertRow(r)
+        # Per-column horizontal alignment. Long text (Src/Dst IP) stays left;
+        # short categorical / numeric columns centre so the visual grid stays
+        # aligned even with mixed-width emoji prefixes.
+        ALIGN_CENTER = (Qt.AlignmentFlag.AlignCenter | Qt.AlignmentFlag.AlignVCenter)
+        ALIGN_LEFT   = (Qt.AlignmentFlag.AlignLeft   | Qt.AlignmentFlag.AlignVCenter)
+        col_align = {
+            0: ALIGN_CENTER,  # Time
+            1: ALIGN_CENTER,    # Src IP
+            2: ALIGN_CENTER,    # Dst IP
+            3: ALIGN_CENTER,  # Protocol
+            4: ALIGN_CENTER,  # Label
+            5: ALIGN_CENTER,  # Confidence
+            6: ALIGN_CENTER,  # Device
+            7: ALIGN_CENTER,  # Score
+            8: ALIGN_CENTER,  # Sniff?
+        }
         for j, (val, col) in enumerate(zip(values, colors)):
             item = QTableWidgetItem(val)
             item.setForeground(QColor(col))
+            item.setTextAlignment(col_align.get(j, ALIGN_LEFT))
             if j in (4, 7):
                 f = QFont(FNT, 11)
                 f.setBold(True)

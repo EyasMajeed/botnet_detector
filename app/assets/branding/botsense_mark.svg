@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" width="64" height="64" fill="none" stroke-linecap="round" stroke-linejoin="round">
+  <!-- Outer hexagon -->
+  <polygon points="32,6 56,19 56,45 32,58 8,45 8,19" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.65"/>
+
+  <!-- Inner hexagon -->
+  <polygon points="32,20 44,27 44,40 32,47 20,40 20,27" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.65"/>
+
+  <!-- Spokes from outer corners to inner corners -->
+  <line x1="32" y1="6"  x2="32" y2="20" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.55"/>
+  <line x1="56" y1="19" x2="44" y2="27" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.55"/>
+  <line x1="56" y1="45" x2="44" y2="40" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.55"/>
+  <line x1="32" y1="58" x2="32" y2="47" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.55"/>
+  <line x1="8"  y1="45" x2="20" y2="40" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.55"/>
+  <line x1="8"  y1="19" x2="20" y2="27" stroke="currentColor" stroke-width="2.4" stroke-opacity="0.55"/>
+
+  <!-- Nodes (corners of outer hex) -->
+  <circle cx="32" cy="6"  r="3" fill="currentColor" fill-opacity="0.85"/>
+  <circle cx="56" cy="45" r="3" fill="currentColor" fill-opacity="0.85"/>
+  <circle cx="32" cy="58" r="3" fill="currentColor" fill-opacity="0.85"/>
+  <circle cx="8"  cy="45" r="3" fill="currentColor" fill-opacity="0.85"/>
+  <circle cx="8"  cy="19" r="3" fill="currentColor" fill-opacity="0.85"/>
+
+  <!-- Highlighted edge + node (the cyan accent in the original) -->
+  <line x1="56" y1="19" x2="44" y2="27" stroke="currentColor" stroke-width="3.2"/>
+  <line x1="56" y1="19" x2="56" y2="45" stroke="currentColor" stroke-width="3.2"/>
+  <circle cx="56" cy="19" r="3.6" fill="currentColor"/>
+</svg>

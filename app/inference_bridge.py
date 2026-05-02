@@ -1,122 +1,154 @@
 """
-inference_bridge.py  —  Single integration point for ML inference
-==================================================================
-This is the ONLY file that needs to change when the preprocessing
-pipeline and trained models are ready.
+inference_bridge.py — File / single-flow inference for the GUI.
 
-Current state: STUB — returns plausible random results so the
-monitoring UI works end-to-end today.
+Used by:
+    UploadPage._run_detection → run_file_inference(info)        (batch)
+    MonitorPage._on_flow      → run_inference(flow_dict)        (single)
 
-Integration checklist (for the preprocessing team):
-    1. Implement _real_inference() below
-    2. Flip USE_REAL_INFERENCE = True
-    3. Done — the rest of the app is untouched
+Pipeline (file path):
+    1. Read CSV with pandas
+    2. Per row: build a 56-feature dict and run Stage-1 RF (with scaler)
+    3. For Non-IoT rows: maintain a per-src_ip sliding window of 20
+       feature rows and run Stage-2 NonIoT CNN-LSTM
+    4. For IoT rows: label "unknown" — Stage-2 IoT requires raw packet
+       Kitsune sequences which a CSV cannot supply. Use the live
+       monitoring page (BotnetMonitor) for IoT detection.
 
-Flow dict keys expected by the real pipeline (all 56 features):
-    See src/preprocessing_pipeline/config.py  →  ALL_FEATURES
+We deliberately reuse the wrapper classes from monitoring.py
+(Stage1Classifier, Stage2NonIoTDetector) instead of the half-finished
+loaders in models/stage1/classifier.py — those bypass the StandardScaler
+and produce wrong predictions.
 """
 
 from __future__ import annotations
-import random
-import time
-from typing import Any
+
+# Force torch single-threaded BEFORE the monitoring import pulls torch in.
+# Same defence-in-depth as monitor_bridge.py (avoids macOS PyQt6+OpenMP
+# segfault when torch.load runs after Qt has initialised libomp).
+import os
+os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
+os.environ.setdefault("OMP_NUM_THREADS",       "1")
+os.environ.setdefault("MKL_NUM_THREADS",       "1")
 
 import sys
+import time
+from collections import defaultdict, deque
 from pathlib import Path
+from typing import Any, Dict, List
+
+import numpy as np
 import pandas as pd
 
-ROOT = Path(__file__).resolve().parents[1]
-sys.path.insert(0, str(ROOT))
+try:
+    import torch
+    torch.set_num_threads(1)
+except Exception:
+    pass
 
-from models.stage1.classifier import Stage1Classifier
-from models.stage2.iot_detector import Stage2Detector
-from file_handler import FileFormat
+# Resolve project root and put it on sys.path so `from monitoring import …`
+# works whether the GUI is launched from app/ or from the project root.
+_ROOT = Path(__file__).resolve().parents[1]
+if str(_ROOT) not in sys.path:
+    sys.path.insert(0, str(_ROOT))
 
-# ── Model loading ─────────────────────────────────────────────────────────────
-_MODEL_PATH_S1 = ROOT / "models" / "stage1" / "rf_model.pkl"
-_MODEL_PATH_S2 = ROOT / "models" / "stage2" / "iot_cnn_lstm.pt"
+from file_handler import FileFormat   # for format guards in run_file_inference
 
-_stage1: Stage1Classifier | None = None
-_stage2: Stage2Detector | None = None
+# Heavy imports are deferred to first use — keeps GUI startup snappy
+_stage1     = None    # monitoring.Stage1Classifier
+_stage2_nin = None    # monitoring.Stage2NonIoTDetector
+_S1_FEATURES: List[str] = []
+_NONIOT_SEQ_LEN: int = 20
 
-def _get_stage1() -> Stage1Classifier:
-    global _stage1
-    if _stage1 is None:
-        _stage1 = Stage1Classifier.load(_MODEL_PATH_S1)
-    return _stage1
-
-def _get_stage2() -> Stage2Detector:
-    global _stage2
-    if _stage2 is None:
-        _stage2 = Stage2Detector.load(_MODEL_PATH_S2)
-    return _stage2
-
-# ── Flip this when the real pipeline is ready ─────────────────────────────────
 USE_REAL_INFERENCE = True
 
 
-# ── Public API ─────────────────────────────────────────────────────────────────
+# ═════════════════════════════════════════════════════════════════════════════
+# Lazy loaders (real models from monitoring.py)
+# ═════════════════════════════════════════════════════════════════════════════
 
-def run_inference(flow: dict) -> dict:
+def _get_stage1():
+    """Load Stage-1 RF/XGB once. Reuses monitoring.py's properly-scaled wrapper."""
+    global _stage1, _S1_FEATURES
+    if _stage1 is None:
+        from monitoring import (Stage1Classifier as _S1, MODEL_S1_RF,
+                                SCALER_S1_JSON, S1_FEATURES)
+        _stage1 = _S1(MODEL_S1_RF, SCALER_S1_JSON)
+        _S1_FEATURES = list(S1_FEATURES)
+    return _stage1
+
+
+def _get_stage2_noniot():
+    """Load Stage-2 Non-IoT CNN-LSTM once."""
+    global _stage2_nin, _NONIOT_SEQ_LEN
+    if _stage2_nin is None:
+        from monitoring import (Stage2NonIoTDetector as _S2, MODEL_S2_NONIOT,
+                                NONIOT_SEQ_LEN)
+        _stage2_nin = _S2(MODEL_S2_NONIOT)
+        _NONIOT_SEQ_LEN = int(NONIOT_SEQ_LEN)
+    return _stage2_nin
+
+
+def _ensure_features_loaded() -> List[str]:
+    """Make sure _S1_FEATURES is populated even if Stage-1 was loaded before."""
+    if not _S1_FEATURES:
+        _get_stage1()
+    return _S1_FEATURES
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Public API
+# ═════════════════════════════════════════════════════════════════════════════
+
+def run_inference(flow: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Run Stage-1 + Stage-2 inference on a single flow dict.
-
-    Args:
-        flow:  Raw flow dictionary from LiveCaptureThread or pcap_parser.
-               The bridge handles feature alignment internally.
-
-    Returns:
-        {
-            "label":       "botnet" | "benign",
-            "confidence":  float  in [0.0, 1.0],
-            "device_type": "iot"  | "noniot",
-            "stage1_conf": float,   # IoT vs Non-IoT confidence
-            "latency_ms":  float,   # wall-clock inference time
-        }
+    Run Stage-1 + Stage-2 NonIoT on a single flow dict (used by UI fall-backs).
+    For real-time monitoring use BotnetMonitor (monitor_bridge.py) instead —
+    it carries the per-IP sliding-window state we don't have here.
     """
-    t0 = time.perf_counter()
-
-    if USE_REAL_INFERENCE:
-        result = run_file_inference(flow)
+    t0  = time.perf_counter()
+    s1  = _get_stage1()
+    s2  = _get_stage2_noniot()
+    feat = _flow_to_feat_dict(flow)
+    device, s1_conf = s1.stage1_predict(feat)
+    if device == "noniot":
+        # Single row, no temporal context — Stage-2 will internally pad to 20.
+        row    = s2.stage2_preprocess_non_iot(feat)
+        seq    = np.stack([row])
+        label, s2_conf = s2.stage2_predict(seq)
     else:
-        result = _stub_inference(flow)
-
-    result["latency_ms"] = round((time.perf_counter() - t0) * 1000, 2)
-    return result
-
-
-# ── Stub (active now) ──────────────────────────────────────────────────────────
-
-def _stub_inference(flow: dict) -> dict:
-    """
-    Realistic-looking random results for UI development.
-    Botnet probability is influenced by suspicion score so the
-    demo feels coherent with the scorer output.
-    """
-    # Use dst_port as a weak heuristic to make stub feel realistic
-    dst = int(flow.get("dst_port", 0) or 0)
-    BOTNET_PORTS = {4444, 9999, 6667, 31337, 2323, 23}
-    base_botnet_prob = 0.65 if dst in BOTNET_PORTS else 0.15
-
-    is_botnet   = random.random() < base_botnet_prob
-    device_iot  = random.random() < 0.45
-    confidence  = round(random.uniform(0.72, 0.99), 3)
-    stage1_conf = round(random.uniform(0.80, 0.99), 3)
-
+        label, s2_conf = "unknown", 0.0
     return {
-        "label":       "botnet" if is_botnet else "benign",
-        "confidence":  confidence,
-        "device_type": "iot" if device_iot else "noniot",
-        "stage1_conf": stage1_conf,
+        "label":       label,
+        "confidence":  float(s2_conf),
+        "device_type": device,
+        "stage1_conf": float(s1_conf),
+        "latency_ms":  round((time.perf_counter() - t0) * 1000, 2),
     }
 
 
-def run_file_inference(info: Any) -> list[dict[str, Any]]:
-    """Run inference on an uploaded file using Stage-1 model."""
+def run_file_inference(info: Any) -> List[Dict[str, Any]]:
+    """
+    Run full Stage-1 + Stage-2 NonIoT pipeline on every row of an uploaded
+    CSV. Returns a list of result dicts, one per input row.
+
+    Each result dict:
+        {
+          "row":          int,
+          "src_ip":       str,
+          "dst_ip":       str,
+          "src_port":     int,
+          "dst_port":     int,
+          "protocol":     "TCP" | "UDP" | "ICMP" | str,
+          "device_type":  "iot" | "noniot",
+          "label":        "botnet" | "benign" | "unknown",
+          "confidence":   float,        # Stage-2 sigmoid (0.0 for IoT/unknown)
+          "stage1_conf":  float,
+          "latency_ms":   float,        # avg per-row wall-clock (filled at end)
+        }
+    """
+    # ── Validation ───────────────────────────────────────────────────────
     if not getattr(info, "is_valid", False):
         raise ValueError("Cannot run inference on an invalid file.")
-    
-    # Load file as DataFrame
     if info.format not in (
         FileFormat.CSV_UNIFIED,
         FileFormat.CSV_GENERIC,
@@ -127,68 +159,198 @@ def run_file_inference(info: Any) -> list[dict[str, Any]]:
     ):
         raise ValueError(
             f"Unsupported file format for inference: {info.format}. "
-            "Only CSV flow exports are supported."
+            "Only CSV flow exports are supported. PCAP files should be replayed "
+            "through monitoring.py --pcap (live pipeline) for full Stage-1 + "
+            "Stage-2 IoT/NonIoT detection."
         )
-    
+
+    # ── Read CSV ─────────────────────────────────────────────────────────
     try:
         df = pd.read_csv(info.path, low_memory=False)
-    except Exception as exc:
-        raise RuntimeError(f"Failed to read CSV for inference: {exc}") from exc
-    
+    except Exception as e:
+        raise RuntimeError(f"Failed to read CSV: {e}") from e
     if df.empty:
         raise ValueError("CSV file contains no data rows.")
-    
-    # Run Stage-1 on the entire DataFrame
-    t0 = time.perf_counter()
-    stage1 = _get_stage1()
-    device_types, stage1_confs = stage1.predict(df)
-    
-    # For now, assume all are benign if not IoT (no Stage-2 for non-IoT)
-    results = []
-    for i, (dt, conf) in enumerate(zip(device_types, stage1_confs)):
-        if dt == "iot":
-            # Would need Stage-2 here, but for simplicity, mark as unknown
-            label = "unknown"  # Since Stage-2 is only for IoT
-            confidence = 0.5
+
+    # ── Prepare models ───────────────────────────────────────────────────
+    s1   = _get_stage1()
+    s2   = _get_stage2_noniot()
+    feats = _ensure_features_loaded()
+
+    # Strip whitespace from column names; downstream lookup is case-sensitive.
+    df.columns = [c.strip() for c in df.columns]
+
+    # Format-specific column aliasing: map dataset-specific names to the unified
+    # 56-feature schema. Anything not aliased is filled with 0.0 per-row.
+    df = _alias_columns(df, info.format)
+
+    # Warn (don't fail) if too few unified features are present after aliasing.
+    matched = sum(1 for c in feats if c in df.columns)
+    if matched < 0.4 * len(feats):
+        raise ValueError(
+            f"CSV has only {matched}/{len(feats)} of the 56 unified features. "
+            "Convert it with data_processing/process_*.py first, or upload a "
+            "CSV produced by your team's preprocessing pipeline."
+        )
+
+    # ── Inference loop ──────────────────────────────────────────────────
+    t0           = time.perf_counter()
+    results:     List[Dict[str, Any]] = []
+    noniot_bufs: Dict[str, deque]     = defaultdict(lambda: deque(maxlen=_NONIOT_SEQ_LEN))
+
+    for i, row in df.iterrows():
+        feat = {c: _safe_float(row.get(c, 0.0)) for c in feats}
+
+        # ── Stage-1 ──────────────────────────────────────────────────────
+        try:
+            device, s1_conf = s1.stage1_predict(feat)
+        except Exception as e:
+            device, s1_conf = "noniot", 0.0
+            print(f"[run_file_inference] Stage-1 failed on row {i}: {e!r}")
+
+        # ── Stage-2 ──────────────────────────────────────────────────────
+        if device == "noniot":
+            try:
+                row_vec = s2.stage2_preprocess_non_iot(feat)
+                # Use src_ip as the per-flow conversation key; fall back to a
+                # per-row id so rows without IPs each get their own (un-padded)
+                # window — the model self-pads internally.
+                src_ip_key = str(row.get("src_ip", "") or f"row_{i}")
+                noniot_bufs[src_ip_key].append(row_vec)
+                seq = np.stack(list(noniot_bufs[src_ip_key]))
+                label, s2_conf = s2.stage2_predict(seq)
+            except Exception as e:
+                label, s2_conf = "unknown", 0.0
+                print(f"[run_file_inference] Stage-2 NonIoT failed on row {i}: {e!r}")
         else:
-            label = "benign"
-            confidence = 0.95
-        
+            # IoT: Stage-2 IoT needs Kitsune packet-level sequences not in CSV.
+            label, s2_conf = "unknown", 0.0
+
+        # ── Build result dict ───────────────────────────────────────────
+        proto_n = int(_safe_float(row.get("protocol", 0)))
+        proto   = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(
+            proto_n, str(proto_n) if proto_n else "—")
+
         results.append({
-            "row": i + 1,
-            "device_type": dt,
-            "label": label,
-            "confidence": float(confidence),
-            "stage1_conf": float(conf),
+            "row":         int(i) + 1,
+            "src_ip":      str(row.get("src_ip", "") or ""),
+            "dst_ip":      str(row.get("dst_ip", "") or ""),
+            "src_port":    int(_safe_float(row.get("src_port", 0))),
+            "dst_port":    int(_safe_float(row.get("dst_port", 0))),
+            "protocol":    proto,
+            "device_type": device,
+            "label":       label,
+            "confidence":  float(s2_conf),
+            "stage1_conf": float(s1_conf),
         })
-    
-    latency = round((time.perf_counter() - t0) * 1000, 2)
-    for result in results:
-        result["latency_ms"] = latency
-    
+
+    # Distribute total wall-clock latency evenly per row (avg)
+    total_ms = (time.perf_counter() - t0) * 1000
+    avg_ms   = round(total_ms / max(len(results), 1), 2)
+    for r in results:
+        r["latency_ms"] = avg_ms
     return results
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# Helpers
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _safe_float(v: Any) -> float:
+    """Coerce anything to float, returning 0.0 on failure (NaN, None, str)."""
+    try:
+        f = float(v)
+        if not np.isfinite(f):
+            return 0.0
+        return f
+    except (TypeError, ValueError):
+        return 0.0
+
+
+def _flow_to_feat_dict(flow: Dict[str, Any]) -> Dict[str, float]:
     """
-    Real inference using Stage-1 and Stage-2 models.
+    Map an arbitrary flow dict (from LiveCaptureThread or upload row) to the
+    56-feature dict Stage-1 expects. Missing keys default to 0.0.
     """
-    # Convert flow dict to DataFrame
-    df = pd.DataFrame([flow])
-    
-    # Stage-1: IoT vs Non-IoT
-    stage1 = _get_stage1()
-    device_type, stage1_conf = stage1.predict(df)
-    
-    # Stage-2: Botnet detection (only for IoT flows)
-    if device_type == "iot":
-        stage2 = _get_stage2()
-        label, confidence = stage2.predict(df)
-    else:
-        # For non-IoT, assume benign (no Stage-2 model for non-IoT yet)
-        label = "benign"
-        confidence = 0.95  # High confidence for benign non-IoT
-    
-    return {
-        "label": label,
-        "confidence": float(confidence),
-        "device_type": device_type,
-        "stage1_conf": float(stage1_conf),
+    feats = _ensure_features_loaded()
+    out: Dict[str, float] = {}
+    for k in feats:
+        out[k] = _safe_float(flow.get(k, 0.0))
+    return out
+
+
+def _alias_columns(df: pd.DataFrame, fmt: FileFormat) -> pd.DataFrame:
+    """
+    Best-effort column rename so dataset-specific exports work with the
+    56-feature unified schema. Returns a renamed copy when aliases applied,
+    otherwise the original df unchanged.
+
+    NOTE: this does NOT recompute features — it only renames matching columns.
+    For full coverage on raw CIC-IDS / CTU-13 dumps, run them through
+    data_processing/process_cicids2017.py or process_ctu13.py first.
+    """
+    aliases: Dict[str, Dict[str, str]] = {
+        # CICFlowMeter standard → unified
+        "cicflow": {
+            "Flow Duration":              "flow_duration",
+            "Total Fwd Packets":          "total_fwd_packets",
+            "Total Backward Packets":     "total_bwd_packets",
+            "Total Length of Fwd Packets":"total_fwd_bytes",
+            "Total Length of Bwd Packets":"total_bwd_bytes",
+            "Fwd Packet Length Min":      "fwd_pkt_len_min",
+            "Fwd Packet Length Max":      "fwd_pkt_len_max",
+            "Fwd Packet Length Mean":     "fwd_pkt_len_mean",
+            "Fwd Packet Length Std":      "fwd_pkt_len_std",
+            "Bwd Packet Length Min":      "bwd_pkt_len_min",
+            "Bwd Packet Length Max":      "bwd_pkt_len_max",
+            "Bwd Packet Length Mean":     "bwd_pkt_len_mean",
+            "Bwd Packet Length Std":      "bwd_pkt_len_std",
+            "Flow Bytes/s":               "flow_bytes_per_sec",
+            "Flow Packets/s":             "flow_pkts_per_sec",
+            "Flow IAT Mean":              "flow_iat_mean",
+            "Flow IAT Std":               "flow_iat_std",
+            "Flow IAT Min":               "flow_iat_min",
+            "Flow IAT Max":               "flow_iat_max",
+            "Fwd IAT Mean":               "fwd_iat_mean",
+            "Fwd IAT Std":                "fwd_iat_std",
+            "Fwd IAT Min":                "fwd_iat_min",
+            "Fwd IAT Max":                "fwd_iat_max",
+            "Bwd IAT Mean":               "bwd_iat_mean",
+            "Bwd IAT Std":                "bwd_iat_std",
+            "Bwd IAT Min":                "bwd_iat_min",
+            "Bwd IAT Max":                "bwd_iat_max",
+            "Fwd Header Length":          "fwd_header_length",
+            "Bwd Header Length":          "bwd_header_length",
+            "FIN Flag Count":             "flag_FIN",
+            "SYN Flag Count":             "flag_SYN",
+            "RST Flag Count":             "flag_RST",
+            "PSH Flag Count":             "flag_PSH",
+            "ACK Flag Count":             "flag_ACK",
+            "URG Flag Count":             "flag_URG",
+            "Protocol":                   "protocol",
+            "Source Port":                "src_port",
+            "Destination Port":           "dst_port",
+            "Source IP":                  "src_ip",
+            "Destination IP":             "dst_ip",
+        },
+        # CTU-13 binetflow → unified
+        "ctu13": {
+            "Dur":      "flow_duration",
+            "Proto":    "protocol",
+            "SrcAddr":  "src_ip",
+            "Sport":    "src_port",
+            "DstAddr":  "dst_ip",
+            "Dport":    "dst_port",
+            "TotPkts":  "total_fwd_packets",
+            "TotBytes": "total_fwd_bytes",
+        },
     }
+    table = (aliases["cicflow"] if fmt == FileFormat.CSV_CICFLOW
+             else aliases["ctu13"] if fmt == FileFormat.CSV_CTU13
+             else None)
+    if table is None:
+        return df
+    rename = {src: dst for src, dst in table.items() if src in df.columns}
+    if not rename:
+        return df
+    return df.rename(columns=rename)
