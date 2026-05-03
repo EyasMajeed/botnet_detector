@@ -1,10 +1,32 @@
-[
-  {
-    "model": "Random Forest",
-    "accuracy": 0.9999,
-    "precision": 0.9999,
-    "recall": 0.9999,
-    "f1_score": 0.9999,
-    "auc_roc": 1.0
-  }
-]
+{
+  "evaluation_method": "v6_monitoring_aligned_groupkfold",
+  "schema_features": 56,
+  "scaler_type": "StandardScaler",
+  "metrics": [
+    {
+      "model": "Random Forest",
+      "accuracy": 0.967,
+      "precision": 0.9677,
+      "recall_weighted": 0.967,
+      "f1_score": 0.9661,
+      "auc_roc": 0.9989,
+      "recall_per_class": {
+        "iot": 0.8548,
+        "noniot": 0.9974
+      }
+    },
+    {
+      "model": "XGBoost",
+      "accuracy": 0.9956,
+      "precision": 0.9957,
+      "recall_weighted": 0.9956,
+      "f1_score": 0.9957,
+      "auc_roc": 0.999,
+      "recall_per_class": {
+        "iot": 0.9958,
+        "noniot": 0.9956
+      }
+    }
+  ],
+  "integration_notes": "Files saved in monitoring.py-compatible format. rf_model.pkl is dict with keys 'model' and 'label_encoder'. s1_scaler.json contains features, mean, scale arrays for live z-score normalization at inference."
+}

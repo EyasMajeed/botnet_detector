@@ -1,0 +1,9 @@
+{
+  "accuracy": 0.9991,
+  "precision": 0.9995,
+  "recall_botnet": 0.9992,
+  "recall_benign": 0.9988,
+  "f1_score": 0.9993,
+  "auc_roc": 1.0,
+  "threshold": 0.52
+}
