@@ -209,9 +209,18 @@ class DetectionStore(QObject):
         ni = sum(1 for f in self.flows if f.device_type == "iot")
         nn = n - ni
         devs = len({f.src_ip for f in self.flows if f.src_ip})
+        # Unique device counts by last-seen src_ip type.
+        device_type_by_ip: dict[str, str] = {}
+        for f in self.flows:
+            if not f.src_ip:
+                continue
+            device_type_by_ip[f.src_ip] = f.device_type
+        n_iot_devs = sum(1 for t in device_type_by_ip.values() if t == "iot")
+        n_noniot_devs = sum(1 for t in device_type_by_ip.values() if t == "noniot")
         return {
             "total_flows": n, "n_botnet": nb, "n_benign": ng, "n_unknown": nu,
             "n_iot": ni, "n_noniot": nn, "devices": devs,
+            "n_iot_devs": n_iot_devs, "n_noniot_devs": n_noniot_devs,
             "n_alerts": sum(1 for f in self.flows if f.alerted),
         }
 

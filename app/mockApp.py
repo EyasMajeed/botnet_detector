@@ -380,6 +380,7 @@ class DashPage(QWidget):
         self.recent_tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.recent_tbl.setFixedHeight(230); self.recent_tbl.setStyleSheet(TABLE_CSS())
         self.recent_tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        self.recent_tbl.horizontalHeader().setDefaultAlignment(Qt.AlignmentFlag.AlignCenter)
         self.recent_tbl.verticalHeader().setDefaultSectionSize(34)
         rv.addWidget(self.recent_tbl); root.addWidget(rc)
 
@@ -402,7 +403,10 @@ class DashPage(QWidget):
         self.sc_t.set_sub(f"{s['n_alerts']} alert(s)" if n else "No flows yet")
         self.sc_b.set_sub(f"{nb/n*100:.1f}% of traffic" if n else "—")
         self.sc_g.set_sub(f"{ng/n*100:.1f}% of traffic" if n else "—")
-        self.sc_d.set_sub(f"{ni} IoT · {nn} Non-IoT" if (ni or nn) else "—")
+        self.sc_d.set_sub(
+            f"{s['n_iot_devs']} IoT devices · {s['n_noniot_devs']} Non-IoT devices"
+            if (s['n_iot_devs'] or s['n_noniot_devs']) else "—"
+        )
         # Pie
         self.pie.set_data(ng, nb)
         if (ng + nb) > 0:
@@ -429,8 +433,10 @@ class DashPage(QWidget):
                 if j == 4:
                     it.setForeground(QColor(ERR if ib else OK))
                     it.setFont(QFont(FNT, 11, QFont.Weight.Bold))
-                if j in (0, 3, 5):
+                if j in (0, 1, 2, 3, 5):
                     it.setFont(QFont("Courier New", 11))
+                if j in (0, 1, 2, 3, 4, 5):
+                    it.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.recent_tbl.setItem(i, j, it)
 
 # ══════════════════════════════════════════════════════════════════════════════
