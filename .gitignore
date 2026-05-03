@@ -1,9 +1,3 @@
-# Runtime app state
-data/state/
-
-# CLI output
-detection_results.csv
-
 # Python bytecode
 __pycache__/
 *$py.class
