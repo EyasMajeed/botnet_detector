@@ -4,5 +4,5 @@
   "real_time_alerts": true,
   "auto_export_reports": false,
   "output_dir": "/Users/eyasmajeed/Desktop/botnet_reports",
-  "table_row_limit": 1000
+  "table_row_limit": 100
 }

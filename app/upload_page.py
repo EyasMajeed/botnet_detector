@@ -44,12 +44,16 @@ from theme import (
     ACC, OK, ERR, WARN, YEL, FNT,
 )
 
+# We only advertise extensions the inference pipeline actually handles end-to-end:
+#   .pcap / .pcapng → Stage-1 + Stage-2 IoT + NonIoT (full pipeline via BotnetMonitor)
+#   .csv            → Stage-1 + Stage-2 NonIoT (IoT rows return 'unknown' because
+#                     Stage-2 IoT needs raw packet sequences, not flow summaries)
+# Other formats (.binetflow / .nfcapd / .nfdump) require pre-processing through
+# data_processing/process_*.py before they can be uploaded.
 ACCEPT_FILTER = (
-    "Network Traffic Files "
-    "(*.pcap *.pcapng *.csv *.txt *.log *.binetflow *.nfcapd *.nfdump);;"
+    "Supported Traffic Files (*.pcap *.pcapng *.csv);;"
     "PCAP Files (*.pcap *.pcapng);;"
-    "CSV / Flow Files (*.csv *.txt *.log *.binetflow);;"
-    "NetFlow Files (*.nfcapd *.nfdump);;"
+    "CSV Files (*.csv);;"
     "All Files (*)"
 )
 
@@ -169,7 +173,7 @@ class DropZone(QFrame):
         v.addWidget(self._title)
 
         self._sub = _lbl(
-            "PCAP · PCAPng · CSV · NetFlow  —  Max 500 MB", 11, color=TD
+            "PCAP · PCAPng · CSV   —  Max 500 MB", 11, color=TD
         )
         self._sub.setAlignment(Qt.AlignmentFlag.AlignCenter)
         v.addWidget(self._sub)
@@ -389,7 +393,13 @@ class UploadPage(QWidget):
         run_row = QHBoxLayout()
         self._run_btn = _btn("▶  Run Detection", "primary", width=180)
         self._run_btn.setEnabled(False)
-        self._run_btn.clicked.connect(self._run_detection)
+        # Single permanent connection — _on_run_button_clicked dispatches based
+        # on the current run state (start vs cancel). Avoids the disconnect/
+        # reconnect dance that's easy to get wrong with Qt's signal API.
+        self._run_btn.clicked.connect(self._on_run_button_clicked)
+
+        # Async PCAP worker handle (None when no PCAP is being processed).
+        self._pcap_worker = None
         self._status_lbl = _lbl("Load a file to begin.", 11, color=TD)
         run_row.addWidget(self._run_btn)
         run_row.addSpacing(16)
@@ -421,8 +431,9 @@ class UploadPage(QWidget):
         v.setSpacing(12)
         v.addWidget(_lbl("Detection Configuration", 14, bold=True))
         v.addWidget(_lbl(
-            "These settings will be passed to the inference pipeline "
-            "when your teammates' models are ready.",
+            "PCAP files run the full Stage-1 + Stage-2 IoT/NonIoT pipeline. "
+            "CSV files run Stage-1 + Stage-2 NonIoT only — IoT rows are flagged "
+            "as 'unknown' because Stage-2 IoT requires raw packet sequences.",
             11, color=TD
         ))
         v.addWidget(_divider())
@@ -430,9 +441,9 @@ class UploadPage(QWidget):
         # Model info row
         models_row = QHBoxLayout()
         for label, value, color in [
-            ("Stage-1 Classifier", "Random Forest", ACC),
-            ("Stage-2 IoT",        "CNN-LSTM",      OK),
-            ("Stage-2 Non-IoT",    "CNN-LSTM",      OK),
+            ("Stage-1 Classifier", "Random Forest",          ACC),
+            ("Stage-2 IoT",        "CNN-LSTM (PCAP only)",   OK),
+            ("Stage-2 Non-IoT",    "CNN-LSTM (PCAP + CSV)",  OK),
             ("XAI Method",         "Permutation Importance", YEL),
         ]:
             cell = QWidget()
@@ -495,18 +506,36 @@ class UploadPage(QWidget):
 
     # ── Run detection ─────────────────────────────────────────────────────────
 
+    # ── Run button dispatcher ─────────────────────────────────────────────
+    def _on_run_button_clicked(self):
+        """Single permanent slot — dispatches to start or cancel."""
+        if self._pcap_worker is not None and self._pcap_worker.isRunning():
+            self._on_pcap_cancel()
+        else:
+            self._run_detection()
+
     def _run_detection(self):
         if not self._current_file:
             return
+        # PCAP / PCAPNG → async worker (see _run_pcap_async).
+        # Everything else → synchronous bridge call (fast enough).
+        if self._current_file.format in (FileFormat.PCAP, FileFormat.PCAPNG):
+            self._run_pcap_async()
+        else:
+            self._run_csv_sync()
 
+    # ── Synchronous CSV path (fast — typically <1s) ───────────────────────
+    def _run_csv_sync(self):
         self._run_btn.setEnabled(False)
+        self._progress.setRange(0, 0)               # indeterminate
         self._progress.show()
         self._status_lbl.setText("Running detection pipeline…")
         self._status_lbl.setStyleSheet(f"color:{ACC};background:transparent;")
+        # Force a paint of the status text BEFORE blocking on inference,
+        # otherwise the user sees nothing until the call returns.
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()
 
-        # Hand off to inference bridge (stub today, real pipeline tomorrow).
-        # The bridge receives the FileInfo object — when the real pipeline is
-        # ready, teammates implement inference_bridge.run_file_inference(info).
         try:
             results = run_file_inference(self._current_file)
         except Exception as e:
@@ -523,3 +552,93 @@ class UploadPage(QWidget):
             )
             self._status_lbl.setStyleSheet(f"color:{OK};background:transparent;")
             self.analysis_done.emit(results)
+
+    # ── Async PCAP path (slow — minutes possible for large files) ─────────
+    def _run_pcap_async(self):
+        """
+        Phase 1 (main thread, blocks ~3-5s):  load BotnetMonitor's models.
+        Phase 2 (worker thread):              process every packet, emit
+                                              progress as it goes. UI stays
+                                              responsive so the user can
+                                              switch tabs / cancel / etc.
+        """
+        from inference_worker import PcapInferenceThread
+
+        # Switch UI to "loading models" state
+        self._run_btn.setEnabled(False)
+        self._status_lbl.setText("Loading detection models…")
+        self._status_lbl.setStyleSheet(f"color:{ACC};background:transparent;")
+        self._progress.setRange(0, 0)               # indeterminate during load
+        self._progress.show()
+        from PyQt6.QtWidgets import QApplication
+        QApplication.processEvents()                # paint status text now
+
+        # Phase 1: construct BotnetMonitor on this (main) thread.
+        worker = PcapInferenceThread(self._current_file.path, parent=self)
+        if not worker.ensure_monitor():
+            self._show_error(
+                f"Model loading failed: {worker._init_error or 'unknown'}"
+            )
+            self._reset_pcap_run_ui()
+            return
+
+        # Phase 2: wire signals, repurpose Run button as Cancel, start worker.
+        worker.progress.connect(self._on_pcap_progress)
+        worker.error.connect(self._on_pcap_error)
+        worker.done.connect(self._on_pcap_done)
+        self._pcap_worker = worker
+
+        self._run_btn.setText("✕  Cancel")
+        self._run_btn.setEnabled(True)
+        worker.start()
+
+    # ── PCAP worker signal slots ──────────────────────────────────────────
+    def _on_pcap_progress(self, current: int, total: int, text: str):
+        if total > 0:
+            if self._progress.maximum() != total:
+                self._progress.setRange(0, total)
+            self._progress.setValue(current)
+        else:
+            self._progress.setRange(0, 0)           # indeterminate
+        self._status_lbl.setText(text)
+        self._status_lbl.setStyleSheet(f"color:{ACC};background:transparent;")
+
+    def _on_pcap_error(self, msg: str):
+        # Cancellation is a normal exit — show as muted info, not red error.
+        if "Cancelled" in msg:
+            self._status_lbl.setText("Cancelled.")
+            self._status_lbl.setStyleSheet(f"color:{TG};background:transparent;")
+        else:
+            self._show_error(f"PCAP inference error: {msg}")
+        self._reset_pcap_run_ui()
+
+    def _on_pcap_done(self, results: list):
+        n = len(results)
+        if n > 0:
+            self._status_lbl.setText(
+                f"✔  Detection complete — {n} result(s) ready. "
+                "Navigate to Results page to view."
+            )
+            self._status_lbl.setStyleSheet(f"color:{OK};background:transparent;")
+            self.analysis_done.emit(results)
+        else:
+            self._status_lbl.setText(
+                "Detection finished — no flows completed in this PCAP."
+            )
+            self._status_lbl.setStyleSheet(f"color:{WARN};background:transparent;")
+        self._reset_pcap_run_ui()
+
+    def _on_pcap_cancel(self):
+        if self._pcap_worker is not None:
+            self._pcap_worker.cancel()
+            self._status_lbl.setText("Cancelling…")
+            self._status_lbl.setStyleSheet(f"color:{WARN};background:transparent;")
+            self._run_btn.setEnabled(False)         # block double-click while shutting down
+
+    def _reset_pcap_run_ui(self):
+        """Restore the Run button + progress bar to their idle state."""
+        self._progress.hide()
+        self._progress.setRange(0, 0)               # back to indeterminate default
+        self._run_btn.setText("▶  Run Detection")
+        self._run_btn.setEnabled(self._current_file is not None)
+        self._pcap_worker = None

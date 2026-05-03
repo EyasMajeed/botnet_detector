@@ -235,7 +235,7 @@ class Sidebar(QWidget):
     switched = pyqtSignal(int)
     # (icon_name from assets/icons/, label, page_index)
     NAV = [("layout-grid",  "Dashboard",        0),
-           ("upload-cloud", "Upload & Analyze", 1),
+           ("upload-cloud", "Upload && Analyze", 1),
            ("activity",     "Monitoring",       2),
            ("list-checks",  "Results",          3),
            ("file-text",    "Reports",          4),
@@ -879,7 +879,8 @@ class SettingsPage(QWidget):
         self._auto_tog.toggled.connect(lambda c: self.settings.set("auto_export_reports", bool(c)))
 
         root.addWidget(scard("Detection Settings", [
-            (("Confidence Threshold","Stage-2 botnet probability cutoff (UI display only)"),
+            (("Confidence Threshold",
+              "Re-labels every flow: botnet if Stage-2 confidence ≥ threshold"),
              self._thresh_cb),
             (("Explainable AI (XAI)","Show feature importance panel in Results"),
              self._xai_tog),
@@ -998,6 +999,8 @@ class MainWindow(QMainWindow):
         self.reports_page.view_report.connect(self._on_view_report)
         # Dashboard "View All" → switch to Results, no filter.
         self.dash_page.view_all_btn.clicked.connect(self._on_view_all)
+        # Settings → threshold change → retroactively re-label all stored flows.
+        self.settings.settings_changed.connect(self._on_settings_changed)
 
     # ── Slots ────────────────────────────────────────────────────────────────
     def _go(self, idx):
@@ -1015,16 +1018,21 @@ class MainWindow(QMainWindow):
         Wire real Stage-2 batch inference later in inference_bridge — no changes
         to this slot will be needed.
         """
+        from detection_store import apply_threshold
+        thresh = self.settings.confidence_threshold
         flows = []
         for r in results or []:
+            raw_label = str(r.get("label", "benign"))
+            conf      = float(r.get("confidence", 0.0))
+            # Apply user threshold — preserves 'unknown' for IoT-from-CSV rows.
             flows.append(DetectionFlow(
                 src_ip        = str(r.get("src_ip", "") or ""),
                 dst_ip        = str(r.get("dst_ip", "") or ""),
                 src_port      = int(r.get("src_port", 0) or 0),
                 dst_port      = int(r.get("dst_port", 0) or 0),
                 protocol      = str(r.get("protocol", "—")),
-                label         = str(r.get("label", "benign")),
-                confidence    = float(r.get("confidence", 0.0)),
+                label         = apply_threshold(raw_label, conf, thresh),
+                confidence    = conf,
                 device_type   = str(r.get("device_type", "noniot")),
                 s1_confidence = float(r.get("stage1_conf", 0.0)),
                 latency_ms    = float(r.get("latency_ms", 0.0)),
@@ -1064,15 +1072,35 @@ class MainWindow(QMainWindow):
     def _on_view_all(self):
         self.results_page.clear_report_filter()
         self.sb._sel(3)
+
+    def _on_settings_changed(self, key: str):
+        """React to settings updates that affect already-stored data."""
+        if key == "confidence_threshold":
+            t       = self.settings.confidence_threshold
+            changed = self.store.relabel_with_threshold(t)
+            self.sbar.set(
+                f"Confidence threshold = {t:.2f} — re-labelled {changed} flow(s)"
+                if changed else
+                f"Confidence threshold = {t:.2f}  (no flows changed)"
+            )
     
     def closeEvent(self, event):
-        """Stop live capture cleanly so the sniff thread doesn't outlive the GUI."""
+        """Stop background work cleanly so threads don't outlive the GUI."""
+        # 1. Live capture (sniff loop)
         try:
             if hasattr(self, "monitor_page") and getattr(self.monitor_page, "_running", False):
                 self.monitor_page.stop_capture()
         except Exception:
             pass
-        # Final persist (defensive — the store auto-persists on every batch)
+        # 2. PCAP inference worker (if user closes mid-job)
+        try:
+            worker = getattr(self.upload_page, "_pcap_worker", None)
+            if worker is not None and worker.isRunning():
+                worker.cancel()
+                worker.wait(2000)   # give it up to 2s to exit cleanly
+        except Exception:
+            pass
+        # 3. Final persist (defensive — store auto-persists on every batch)
         try:
             self.store.save()
             self.settings.save()

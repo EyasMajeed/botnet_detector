@@ -372,6 +372,14 @@ class MonitorPage(QWidget):
             confidence = infer["confidence"]
             device     = infer["device_type"]
 
+        # 2b. Apply user's confidence threshold from Settings (functional).
+        # The pre-trained models have internal thresholds (IoT 0.52, NonIoT
+        # 0.7656); this lets the user move the operating point on the ROC
+        # curve without retraining. 'unknown' labels are preserved.
+        if self.settings is not None and label != "unknown":
+            from detection_store import apply_threshold
+            label = apply_threshold(label, confidence, self.settings.confidence_threshold)
+
         # 3. Update counters
         self._total_flows += 1
         if label == "botnet":
@@ -550,8 +558,8 @@ class MonitorPage(QWidget):
         ALIGN_LEFT   = (Qt.AlignmentFlag.AlignLeft   | Qt.AlignmentFlag.AlignVCenter)
         col_align = {
             0: ALIGN_CENTER,  # Time
-            1: ALIGN_CENTER,    # Src IP
-            2: ALIGN_CENTER,    # Dst IP
+            1: ALIGN_CENTER,  # Src IP
+            2: ALIGN_CENTER,  # Dst IP
             3: ALIGN_CENTER,  # Protocol
             4: ALIGN_CENTER,  # Label
             5: ALIGN_CENTER,  # Confidence

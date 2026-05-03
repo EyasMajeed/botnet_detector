@@ -45,6 +45,29 @@ SIGNAL_DEBOUNCE_MS = 250      # coalesce flows_changed emissions to ~4Hz
 
 
 # ═════════════════════════════════════════════════════════════════════════════
+# Threshold helper (used by ingestion paths AND retroactive re-labelling)
+# ═════════════════════════════════════════════════════════════════════════════
+
+def apply_threshold(label: str, confidence: float, threshold: float) -> str:
+    """
+    Apply the user's confidence threshold to a flow's label.
+
+    Rules:
+        - "unknown" labels are NEVER re-labelled (e.g. IoT rows from CSVs
+          that couldn't run Stage-2 — there's no signal to compare).
+        - Otherwise: label = "botnet" if confidence >= threshold else "benign".
+
+    Lowering threshold raises Recall (catches more botnet flows) at the
+    cost of Precision. Pre-trained models have their own internal thresholds
+    (IoT: 0.52, NonIoT: 0.7656); this lets the GUI override that decision
+    without retraining.
+    """
+    if label == "unknown":
+        return "unknown"
+    return "botnet" if confidence >= threshold else "benign"
+
+
+# ═════════════════════════════════════════════════════════════════════════════
 # Data classes
 # ═════════════════════════════════════════════════════════════════════════════
 
@@ -182,11 +205,12 @@ class DetectionStore(QObject):
         n  = len(self.flows)
         nb = sum(1 for f in self.flows if f.label == "botnet")
         ng = sum(1 for f in self.flows if f.label == "benign")
+        nu = sum(1 for f in self.flows if f.label == "unknown")
         ni = sum(1 for f in self.flows if f.device_type == "iot")
         nn = n - ni
         devs = len({f.src_ip for f in self.flows if f.src_ip})
         return {
-            "total_flows": n, "n_botnet": nb, "n_benign": ng,
+            "total_flows": n, "n_botnet": nb, "n_benign": ng, "n_unknown": nu,
             "n_iot": ni, "n_noniot": nn, "devices": devs,
             "n_alerts": sum(1 for f in self.flows if f.alerted),
         }
@@ -246,6 +270,60 @@ class DetectionStore(QObject):
             self.flows   = []
             self.reports = []
             self._next_report_n = 1
+
+    # ── Threshold (re-labelling) ────────────────────────────────────────────
+    def relabel_with_threshold(self, threshold: float) -> int:
+        """
+        Walk every stored flow and re-apply apply_threshold() in place.
+        Reports' n_botnet / n_benign counters are recomputed from scratch.
+
+        Returns the number of flows whose label changed (e.g. for status:
+        "Re-labelled with threshold 0.40 — 12 flows changed").
+        """
+        if not self.flows:
+            return 0
+        changed = 0
+        for f in self.flows:
+            new_label = apply_threshold(f.label, f.confidence, threshold)
+            if new_label != f.label:
+                f.label = new_label
+                changed += 1
+        if changed:
+            self._recount_reports()
+            self.save()
+            self._emit_flows_changed_now()
+            self.reports_changed.emit()
+        return changed
+
+    def _recount_reports(self) -> None:
+        """
+        Rebuild n_botnet / n_benign / n_iot / n_noniot for every Report from
+        the current flows list. Called after retroactive re-labelling.
+        n_flows / duration_sec are NOT recomputed (they're invariants).
+        """
+        per_report: dict = {}
+        for f in self.flows:
+            d = per_report.setdefault(
+                f.report_id,
+                {"botnet": 0, "benign": 0, "iot": 0, "noniot": 0},
+            )
+            if f.label == "botnet":
+                d["botnet"] += 1
+            elif f.label == "benign":
+                d["benign"] += 1
+            if f.device_type == "iot":
+                d["iot"] += 1
+            else:
+                d["noniot"] += 1
+        for r in self.reports:
+            d = per_report.get(r.report_id)
+            if d is None:
+                continue
+            r.n_botnet = d["botnet"]
+            r.n_benign = d["benign"]
+            r.n_iot    = d["iot"]
+            r.n_noniot = d["noniot"]
+
 
     def clear(self) -> None:
         """Wipe everything. Used by Settings → 'Clear all data'."""

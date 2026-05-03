@@ -5,19 +5,15 @@ Used by:
     UploadPage._run_detection → run_file_inference(info)        (batch)
     MonitorPage._on_flow      → run_inference(flow_dict)        (single)
 
-Pipeline (file path):
-    1. Read CSV with pandas
-    2. Per row: build a 56-feature dict and run Stage-1 RF (with scaler)
-    3. For Non-IoT rows: maintain a per-src_ip sliding window of 20
-       feature rows and run Stage-2 NonIoT CNN-LSTM
-    4. For IoT rows: label "unknown" — Stage-2 IoT requires raw packet
-       Kitsune sequences which a CSV cannot supply. Use the live
-       monitoring page (BotnetMonitor) for IoT detection.
+File-format routing:
+    PCAP / PCAPNG  →  Stage-1 + Stage-2 IoT/NonIoT (full pipeline)
+    CSV (any)      →  Stage-1 + Stage-2 NonIoT only (IoT rows = 'unknown'
+                       because Stage-2 IoT needs raw packet sequences)
 
 We deliberately reuse the wrapper classes from monitoring.py
-(Stage1Classifier, Stage2NonIoTDetector) instead of the half-finished
-loaders in models/stage1/classifier.py — those bypass the StandardScaler
-and produce wrong predictions.
+(Stage1Classifier, Stage2NonIoTDetector, BotnetMonitor) instead of the
+half-finished loaders in models/stage1/classifier.py — those bypass the
+StandardScaler and produce wrong predictions.
 """
 
 from __future__ import annotations
@@ -89,7 +85,6 @@ def _get_stage2_noniot():
 
 
 def _ensure_features_loaded() -> List[str]:
-    """Make sure _S1_FEATURES is populated even if Stage-1 was loaded before."""
     if not _S1_FEATURES:
         _get_stage1()
     return _S1_FEATURES
@@ -101,19 +96,18 @@ def _ensure_features_loaded() -> List[str]:
 
 def run_inference(flow: Dict[str, Any]) -> Dict[str, Any]:
     """
-    Run Stage-1 + Stage-2 NonIoT on a single flow dict (used by UI fall-backs).
-    For real-time monitoring use BotnetMonitor (monitor_bridge.py) instead —
-    it carries the per-IP sliding-window state we don't have here.
+    Run Stage-1 + Stage-2 NonIoT on a single flow dict (UI fall-back path).
+    For real-time monitoring use BotnetMonitor (monitor_bridge.py) — it
+    carries per-IP sliding-window state we don't have here.
     """
-    t0  = time.perf_counter()
-    s1  = _get_stage1()
-    s2  = _get_stage2_noniot()
+    t0 = time.perf_counter()
+    s1 = _get_stage1()
+    s2 = _get_stage2_noniot()
     feat = _flow_to_feat_dict(flow)
     device, s1_conf = s1.stage1_predict(feat)
     if device == "noniot":
-        # Single row, no temporal context — Stage-2 will internally pad to 20.
-        row    = s2.stage2_preprocess_non_iot(feat)
-        seq    = np.stack([row])
+        row = s2.stage2_preprocess_non_iot(feat)
+        seq = np.stack([row])
         label, s2_conf = s2.stage2_predict(seq)
     else:
         label, s2_conf = "unknown", 0.0
@@ -128,8 +122,11 @@ def run_inference(flow: Dict[str, Any]) -> Dict[str, Any]:
 
 def run_file_inference(info: Any) -> List[Dict[str, Any]]:
     """
-    Run full Stage-1 + Stage-2 NonIoT pipeline on every row of an uploaded
-    CSV. Returns a list of result dicts, one per input row.
+    Run the full Stage-1 + Stage-2 pipeline over an uploaded file.
+
+    Routing:
+        PCAP / PCAPNG  →  _run_pcap_inference()  (Stage-1 + Stage-2 IoT + NonIoT)
+        CSV (any)      →  _run_csv_inference()   (Stage-1 + Stage-2 NonIoT only)
 
     Each result dict:
         {
@@ -141,14 +138,17 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
           "protocol":     "TCP" | "UDP" | "ICMP" | str,
           "device_type":  "iot" | "noniot",
           "label":        "botnet" | "benign" | "unknown",
-          "confidence":   float,        # Stage-2 sigmoid (0.0 for IoT/unknown)
+          "confidence":   float,        # Stage-2 sigmoid (0.0 for IoT-from-CSV)
           "stage1_conf":  float,
-          "latency_ms":   float,        # avg per-row wall-clock (filled at end)
+          "latency_ms":   float,
         }
     """
-    # ── Validation ───────────────────────────────────────────────────────
     if not getattr(info, "is_valid", False):
         raise ValueError("Cannot run inference on an invalid file.")
+
+    if info.format in (FileFormat.PCAP, FileFormat.PCAPNG):
+        return _run_pcap_inference(info.path)
+
     if info.format not in (
         FileFormat.CSV_UNIFIED,
         FileFormat.CSV_GENERIC,
@@ -159,12 +159,18 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
     ):
         raise ValueError(
             f"Unsupported file format for inference: {info.format}. "
-            "Only CSV flow exports are supported. PCAP files should be replayed "
-            "through monitoring.py --pcap (live pipeline) for full Stage-1 + "
-            "Stage-2 IoT/NonIoT detection."
+            "Supported formats: PCAP, PCAPNG, CSV (unified / CICFlowMeter / "
+            "CTU-13 / UNSW-NB15 / NetFlow CSV)."
         )
+    return _run_csv_inference(info)
 
-    # ── Read CSV ─────────────────────────────────────────────────────────
+
+def _run_csv_inference(info: Any) -> List[Dict[str, Any]]:
+    """
+    CSV path: Stage-1 RF + Stage-2 NonIoT CNN-LSTM. IoT-classified rows
+    return label='unknown' because Stage-2 IoT needs raw packet-level
+    Kitsune statistics not available from a flow-level CSV.
+    """
     try:
         df = pd.read_csv(info.path, low_memory=False)
     except Exception as e:
@@ -172,19 +178,13 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
     if df.empty:
         raise ValueError("CSV file contains no data rows.")
 
-    # ── Prepare models ───────────────────────────────────────────────────
-    s1   = _get_stage1()
-    s2   = _get_stage2_noniot()
+    s1    = _get_stage1()
+    s2    = _get_stage2_noniot()
     feats = _ensure_features_loaded()
 
-    # Strip whitespace from column names; downstream lookup is case-sensitive.
     df.columns = [c.strip() for c in df.columns]
-
-    # Format-specific column aliasing: map dataset-specific names to the unified
-    # 56-feature schema. Anything not aliased is filled with 0.0 per-row.
     df = _alias_columns(df, info.format)
 
-    # Warn (don't fail) if too few unified features are present after aliasing.
     matched = sum(1 for c in feats if c in df.columns)
     if matched < 0.4 * len(feats):
         raise ValueError(
@@ -193,28 +193,21 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
             "CSV produced by your team's preprocessing pipeline."
         )
 
-    # ── Inference loop ──────────────────────────────────────────────────
-    t0           = time.perf_counter()
-    results:     List[Dict[str, Any]] = []
-    noniot_bufs: Dict[str, deque]     = defaultdict(lambda: deque(maxlen=_NONIOT_SEQ_LEN))
+    t0 = time.perf_counter()
+    results: List[Dict[str, Any]] = []
+    noniot_bufs: Dict[str, deque] = defaultdict(lambda: deque(maxlen=_NONIOT_SEQ_LEN))
 
     for i, row in df.iterrows():
         feat = {c: _safe_float(row.get(c, 0.0)) for c in feats}
-
-        # ── Stage-1 ──────────────────────────────────────────────────────
         try:
             device, s1_conf = s1.stage1_predict(feat)
         except Exception as e:
             device, s1_conf = "noniot", 0.0
             print(f"[run_file_inference] Stage-1 failed on row {i}: {e!r}")
 
-        # ── Stage-2 ──────────────────────────────────────────────────────
         if device == "noniot":
             try:
                 row_vec = s2.stage2_preprocess_non_iot(feat)
-                # Use src_ip as the per-flow conversation key; fall back to a
-                # per-row id so rows without IPs each get their own (un-padded)
-                # window — the model self-pads internally.
                 src_ip_key = str(row.get("src_ip", "") or f"row_{i}")
                 noniot_bufs[src_ip_key].append(row_vec)
                 seq = np.stack(list(noniot_bufs[src_ip_key]))
@@ -223,10 +216,8 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
                 label, s2_conf = "unknown", 0.0
                 print(f"[run_file_inference] Stage-2 NonIoT failed on row {i}: {e!r}")
         else:
-            # IoT: Stage-2 IoT needs Kitsune packet-level sequences not in CSV.
             label, s2_conf = "unknown", 0.0
 
-        # ── Build result dict ───────────────────────────────────────────
         proto_n = int(_safe_float(row.get("protocol", 0)))
         proto   = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(
             proto_n, str(proto_n) if proto_n else "—")
@@ -244,9 +235,7 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
             "stage1_conf": float(s1_conf),
         })
 
-    # Distribute total wall-clock latency evenly per row (avg)
-    total_ms = (time.perf_counter() - t0) * 1000
-    avg_ms   = round(total_ms / max(len(results), 1), 2)
+    avg_ms = round((time.perf_counter() - t0) * 1000 / max(len(results), 1), 2)
     for r in results:
         r["latency_ms"] = avg_ms
     return results
@@ -257,7 +246,6 @@ def run_file_inference(info: Any) -> List[Dict[str, Any]]:
 # ═════════════════════════════════════════════════════════════════════════════
 
 def _safe_float(v: Any) -> float:
-    """Coerce anything to float, returning 0.0 on failure (NaN, None, str)."""
     try:
         f = float(v)
         if not np.isfinite(f):
@@ -268,29 +256,20 @@ def _safe_float(v: Any) -> float:
 
 
 def _flow_to_feat_dict(flow: Dict[str, Any]) -> Dict[str, float]:
-    """
-    Map an arbitrary flow dict (from LiveCaptureThread or upload row) to the
-    56-feature dict Stage-1 expects. Missing keys default to 0.0.
-    """
     feats = _ensure_features_loaded()
-    out: Dict[str, float] = {}
-    for k in feats:
-        out[k] = _safe_float(flow.get(k, 0.0))
-    return out
+    return {k: _safe_float(flow.get(k, 0.0)) for k in feats}
 
 
 def _alias_columns(df: pd.DataFrame, fmt: FileFormat) -> pd.DataFrame:
     """
     Best-effort column rename so dataset-specific exports work with the
-    56-feature unified schema. Returns a renamed copy when aliases applied,
-    otherwise the original df unchanged.
+    56-feature unified schema. Returns a renamed copy when aliases applied.
 
     NOTE: this does NOT recompute features — it only renames matching columns.
     For full coverage on raw CIC-IDS / CTU-13 dumps, run them through
     data_processing/process_cicids2017.py or process_ctu13.py first.
     """
     aliases: Dict[str, Dict[str, str]] = {
-        # CICFlowMeter standard → unified
         "cicflow": {
             "Flow Duration":              "flow_duration",
             "Total Fwd Packets":          "total_fwd_packets",
@@ -333,7 +312,6 @@ def _alias_columns(df: pd.DataFrame, fmt: FileFormat) -> pd.DataFrame:
             "Source IP":                  "src_ip",
             "Destination IP":             "dst_ip",
         },
-        # CTU-13 binetflow → unified
         "ctu13": {
             "Dur":      "flow_duration",
             "Proto":    "protocol",
@@ -354,3 +332,141 @@ def _alias_columns(df: pd.DataFrame, fmt: FileFormat) -> pd.DataFrame:
     if not rename:
         return df
     return df.rename(columns=rename)
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# PCAP inference
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _run_pcap_inference(pcap_path: str) -> List[Dict[str, Any]]:
+    """
+    Replay a PCAP / PCAPNG file through the full BotnetMonitor pipeline.
+
+    This gives us proper Stage-1 + Stage-2 IoT/NonIoT detection because we
+    have raw packets, which means Kitsune (the IoT Stage-2 feature
+    extractor) can build its 115-dim packet-level statistics.
+
+    Implementation notes:
+        - We construct a FRESH BotnetMonitor per call. BotnetMonitor carries
+          per-IP buffers + flow aggregator state that would leak between
+          uploads if cached. The 3-5s model-loading cost per upload is
+          acceptable; if it becomes a bottleneck, add a reset() method to
+          BotnetMonitor that wipes state but keeps loaded weights.
+
+        - flush_idle_flows() expires flows whose last_seen is older than
+          FLOW_IDLE_TIMEOUT (30s) relative to time.time(). After processing
+          a PCAP with arbitrary timestamps, that may or may not catch every
+          open flow. We force-flush by setting the aggregator's idle window
+          to a huge negative number, which makes every open flow expired on
+          the next scan regardless of timestamps.
+
+        - This blocks the main thread until the PCAP is fully processed.
+          For a small (<10MB) PCAP that's fine. For very large files,
+          consider running in a QThread (with the main-thread torch.load
+          caveat from monitor_bridge.py applied — i.e. construct the
+          BotnetMonitor on the main thread first, then hand it to the
+          worker for the sniff loop).
+    """
+    try:
+        from monitoring import BotnetMonitor
+        from scapy.all import rdpcap, IP, TCP, UDP, ICMP, Ether
+    except Exception as e:
+        raise RuntimeError(
+            f"PCAP inference unavailable: {e!r}. "
+            "Install scapy and ensure monitoring.py + all model artifacts are in place."
+        ) from e
+
+    monitor = BotnetMonitor()        # loads RF + 2 CNN-LSTMs (~3-5s)
+    detection_results = []
+
+    t0 = time.perf_counter()
+    try:
+        packets = rdpcap(pcap_path)
+    except Exception as e:
+        raise RuntimeError(f"Failed to read PCAP: {e}") from e
+
+    for pkt in packets:
+        if IP not in pkt:
+            continue
+        ip   = pkt[IP]
+        ts   = float(pkt.time)
+        mac  = pkt[Ether].src if Ether in pkt else ip.src
+        plen = len(pkt)
+        try:
+            if TCP in pkt:
+                tcp = pkt[TCP]
+                r = monitor.process_packet(
+                    ts, ip.src, ip.dst, int(tcp.sport), int(tcp.dport),
+                    6, plen, int(ip.ttl), mac, int(tcp.flags),
+                )
+            elif UDP in pkt:
+                udp = pkt[UDP]
+                r = monitor.process_packet(
+                    ts, ip.src, ip.dst, int(udp.sport), int(udp.dport),
+                    17, plen, int(ip.ttl), mac, 0,
+                )
+            elif ICMP in pkt:
+                r = monitor.process_packet(
+                    ts, ip.src, ip.dst, 0, 0,
+                    1, plen, int(ip.ttl), mac, 0,
+                )
+            else:
+                continue
+        except Exception as e:
+            print(f"[_run_pcap_inference] process_packet error: {e!r}")
+            continue
+        if r is not None:
+            detection_results.append(r)
+
+    # Force-flush every still-open flow.
+    # _idle = -1e9 makes the predicate `(now - last_seen) > _idle` always true.
+    try:
+        monitor.aggregator._idle = -1e9
+        detection_results.extend(monitor.flush_idle_flows())
+    except Exception as e:
+        print(f"[_run_pcap_inference] final flush error: {e!r}")
+
+    return _detection_results_to_dicts(detection_results, t0)
+
+
+def _detection_results_to_dicts(detection_results: List[Any],
+                                t0: float) -> List[Dict[str, Any]]:
+    """
+    Convert a list of monitoring.DetectionResult into the GUI's result-dict
+    format. Shared by the sync (_run_pcap_inference) and async
+    (inference_worker.PcapInferenceThread) paths so they emit identical shapes.
+
+    `t0` is a perf_counter() snapshot taken when packet processing started;
+    it's used to compute an average per-row latency stamped onto every dict.
+    """
+    out: List[Dict[str, Any]] = []
+    for i, r in enumerate(detection_results, 1):
+        src_port = dst_port = 0
+        proto    = "—"
+        try:
+            left, _, rest = r.flow_id.partition("<->")
+            right, _, p   = rest.partition("/")
+            _, _, sp = left.rpartition(":")
+            _, _, dp = right.rpartition(":")
+            src_port = int(sp); dst_port = int(dp)
+            proto    = {"6":"TCP","17":"UDP","1":"ICMP"}.get(p, p)
+        except Exception:
+            # Malformed flow_id — leave ports/proto as defaults
+            pass
+        out.append({
+            "row":         i,
+            "src_ip":      r.src_ip,
+            "dst_ip":      r.dst_ip,
+            "src_port":    src_port,
+            "dst_port":    dst_port,
+            "protocol":    proto,
+            "device_type": r.device_type,
+            "label":       r.label,
+            "confidence":  float(r.s2_confidence),
+            "stage1_conf": float(r.s1_confidence),
+        })
+
+    avg_ms = round((time.perf_counter() - t0) * 1000 / max(len(out), 1), 2)
+    for o in out:
+        o["latency_ms"] = avg_ms
+    return out
