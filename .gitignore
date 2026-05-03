@@ -49,6 +49,12 @@ venv.bak/
 # Python environment settings
 .python-version
 
+# User-specific generated data
+data/state/
+
+# Detection Results
+detection_results.csv
+
 # IDE / editor directories
 .vscode/
 .idea/
