@@ -1,0 +1,8 @@
+{
+  "confidence_threshold": 0.5,
+  "xai_enabled": true,
+  "real_time_alerts": true,
+  "auto_export_reports": false,
+  "output_dir": "/Users/eyasmajeed/Desktop/botnet_reports",
+  "table_row_limit": 0
+}
