@@ -1,0 +1,50 @@
+{
+  "all": {
+    "name": "ALL",
+    "n": 200000,
+    "botnet_flows": 162906,
+    "benign_flows": 37094,
+    "precision": 0.9837339039867398,
+    "recall": 0.48818336955053837,
+    "f1": 0.652540112985079,
+    "roc_auc": 0.7284962717874327,
+    "tp": 79528,
+    "fn": 83378,
+    "fp": 1315,
+    "tn": 35779,
+    "mean_prob_true_botnet": 0.4199653683402282,
+    "mean_prob_true_benign": 0.04753444613032782
+  },
+  "active": {
+    "name": "ACTIVE",
+    "n": 114614,
+    "botnet_flows": 81399,
+    "benign_flows": 33215,
+    "precision": 0.983746072586032,
+    "recall": 0.9770144596370963,
+    "f1": 0.9803687107451261,
+    "roc_auc": 0.9777632964621059,
+    "tp": 79528,
+    "fn": 1871,
+    "fp": 1314,
+    "tn": 31901,
+    "mean_prob_true_botnet": 0.8336854258971204,
+    "mean_prob_true_benign": 0.05236953199929038
+  },
+  "empty": {
+    "name": "EMPTY",
+    "n": 85386,
+    "botnet_flows": 81507,
+    "benign_flows": 3879,
+    "precision": 0.0,
+    "recall": 0.0,
+    "f1": 0.0,
+    "roc_auc": 0.6062137322044909,
+    "tp": 0,
+    "fn": 81507,
+    "fp": 1,
+    "tn": 3878,
+    "mean_prob_true_botnet": 0.0067935062293238615,
+    "mean_prob_true_benign": 0.006132698995088942
+  }
+}

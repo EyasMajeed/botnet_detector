@@ -1,0 +1,1043 @@
+{
+  "csv": "/Users/zeyadalghamdi/Desktop/Graduation Project/data/raw/cicids2018/02-15-2018.csv",
+  "rows_evaluated": 200000,
+  "ground_truth": {
+    "botnet": 52498,
+    "benign": 147502
+  },
+  "stratification": {
+    "active": 157869,
+    "empty": 42131,
+    "definition": "empty = TotLen Fwd Pkts == 0 AND Tot Bwd Pkts == 0"
+  },
+  "strata_evaluated": [
+    "all",
+    "active",
+    "empty"
+  ],
+  "threshold_sweep": [
+    0.1,
+    0.2,
+    0.3,
+    0.4,
+    0.5,
+    0.6,
+    0.7,
+    0.8,
+    0.9
+  ],
+  "tile_caveat": "Constant-tile sequences (no src_ip) collapse the LSTM into a fixed-point computation. Treat results as feature-space generalisation only.",
+  "results": [
+    {
+      "arch": "hybrid",
+      "status": "ok",
+      "model_path": "/Users/zeyadalghamdi/Desktop/Graduation Project/models/stage2/noniot_cnn_lstm.pt",
+      "model_type": "noniot_cnn_lstm",
+      "n_features": 46,
+      "seq_len": 20,
+      "strata": {
+        "all": {
+          "status": "ok",
+          "n": 200000,
+          "botnet_flows": 52498,
+          "benign_flows": 147502,
+          "mean_prob_true_botnet": 0.417499303817749,
+          "mean_prob_true_benign": 0.08815084397792816,
+          "at_train_threshold": {
+            "threshold": 0.7656164169311523,
+            "precision": 0.7077235487710944,
+            "recall": 0.3850432397424664,
+            "f1": 0.4987416728349371,
+            "auc_roc": 0.6905199897414213,
+            "tp": 20214,
+            "fn": 32284,
+            "fp": 8348,
+            "tn": 139154
+          },
+          "best_in_sweep": {
+            "basis": "max F1 (recall target unattainable in sweep)",
+            "threshold": 0.1,
+            "precision": 0.6001943881000676,
+            "recall": 0.5410872795154101,
+            "f1": 0.5691102518381984
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.6001943881000676,
+              "recall": 0.5410872795154101,
+              "f1": 0.5691102518381984,
+              "TP": 28406,
+              "FN": 24092,
+              "FP": 18922
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.5902219834428191,
+              "recall": 0.460379443026401,
+              "f1": 0.5172771731569766,
+              "TP": 24169,
+              "FN": 28329,
+              "FP": 16780
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.6100991702084598,
+              "recall": 0.4593698807573622,
+              "f1": 0.5241127507443548,
+              "TP": 24116,
+              "FN": 28382,
+              "FP": 15412
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.6292941239718295,
+              "recall": 0.445940797744676,
+              "f1": 0.521984392419175,
+              "TP": 23411,
+              "FN": 29087,
+              "FP": 13791
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.6489050076719207,
+              "recall": 0.4430644976951503,
+              "f1": 0.5265838832731512,
+              "TP": 23260,
+              "FN": 29238,
+              "FP": 12585
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.6915036183328866,
+              "recall": 0.44230256390719647,
+              "f1": 0.5395169441314173,
+              "TP": 23220,
+              "FN": 29278,
+              "FP": 10359
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.7136686991869918,
+              "recall": 0.4280544020724599,
+              "f1": 0.535136808515705,
+              "TP": 22472,
+              "FN": 30026,
+              "FP": 9016
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.6676971270763777,
+              "recall": 0.308564135776601,
+              "f1": 0.42207428444872913,
+              "TP": 16199,
+              "FN": 36299,
+              "FP": 8062
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.689280868385346,
+              "recall": 0.29029677321040803,
+              "f1": 0.4085352777182072,
+              "TP": 15240,
+              "FN": 37258,
+              "FP": 6870
+            }
+          ]
+        },
+        "active": {
+          "status": "ok",
+          "n": 157869,
+          "botnet_flows": 36405,
+          "benign_flows": 121464,
+          "mean_prob_true_botnet": 0.5990507006645203,
+          "mean_prob_true_benign": 0.10564923286437988,
+          "at_train_threshold": {
+            "threshold": 0.7656164169311523,
+            "precision": 0.7077483281397711,
+            "recall": 0.5552533992583436,
+            "f1": 0.6222947387864421,
+            "auc_roc": 0.7871088917197102,
+            "tp": 20214,
+            "fn": 16191,
+            "fp": 8347,
+            "tn": 113117
+          },
+          "best_in_sweep": {
+            "basis": "max F1 (recall target unattainable in sweep)",
+            "threshold": 0.1,
+            "precision": 0.6002070699600651,
+            "recall": 0.7802774344183492,
+            "f1": 0.6784980652558161
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.6002070699600651,
+              "recall": 0.7802774344183492,
+              "f1": 0.6784980652558161,
+              "TP": 28406,
+              "FN": 7999,
+              "FP": 18921
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.5902363973820455,
+              "recall": 0.6638923224831754,
+              "f1": 0.6249014259304746,
+              "TP": 24169,
+              "FN": 12236,
+              "FP": 16779
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.6101146052065677,
+              "recall": 0.6624364785056998,
+              "f1": 0.63519991571406,
+              "TP": 24116,
+              "FN": 12289,
+              "FP": 15411
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.6293110400258057,
+              "recall": 0.6430710067298449,
+              "f1": 0.6361166209276418,
+              "TP": 23411,
+              "FN": 12994,
+              "FP": 13790
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.648923111259904,
+              "recall": 0.6389232248317539,
+              "f1": 0.643884344419992,
+              "TP": 23260,
+              "FN": 13145,
+              "FP": 12584
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.6915242122818512,
+              "recall": 0.6378244746600742,
+              "f1": 0.6635897289341697,
+              "TP": 23220,
+              "FN": 13185,
+              "FP": 10358
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.7136913646901896,
+              "recall": 0.6172778464496635,
+              "f1": 0.6619925764449419,
+              "TP": 22472,
+              "FN": 13933,
+              "FP": 9015
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.667724649629019,
+              "recall": 0.44496635077599234,
+              "f1": 0.534047638671392,
+              "TP": 16199,
+              "FN": 20206,
+              "FP": 8061
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.6893120448686055,
+              "recall": 0.4186238154099712,
+              "f1": 0.5209009809618211,
+              "TP": 15240,
+              "FN": 21165,
+              "FP": 6869
+            }
+          ]
+        },
+        "empty": {
+          "status": "ok",
+          "n": 42131,
+          "botnet_flows": 16093,
+          "benign_flows": 26038,
+          "mean_prob_true_botnet": 0.006800415460020304,
+          "mean_prob_true_benign": 0.006523104850202799,
+          "at_train_threshold": {
+            "threshold": 0.7656164169311523,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "auc_roc": 0.7272214349454422,
+            "tp": 0,
+            "fn": 16093,
+            "fp": 1,
+            "tn": 26037
+          },
+          "best_in_sweep": {
+            "basis": "max F1 (recall target unattainable in sweep)",
+            "threshold": 0.1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "arch": "cnn-only",
+      "status": "ok",
+      "model_path": "/Users/zeyadalghamdi/Desktop/Graduation Project/evaluation/cnn_test/results/noniot/model.pt",
+      "model_type": "cnn_only",
+      "n_features": 46,
+      "seq_len": 20,
+      "strata": {
+        "all": {
+          "status": "ok",
+          "n": 200000,
+          "botnet_flows": 52498,
+          "benign_flows": 147502,
+          "mean_prob_true_botnet": 0.5477732419967651,
+          "mean_prob_true_benign": 0.19948261976242065,
+          "at_train_threshold": {
+            "threshold": 0.7732671499252319,
+            "precision": 0.49575051286913646,
+            "recall": 0.547773248504705,
+            "f1": 0.5204651373241029,
+            "auc_roc": 0.671165586911532,
+            "tp": 28757,
+            "fn": 23741,
+            "fp": 29250,
+            "tn": 118252
+          },
+          "best_in_sweep": {
+            "basis": "max F1 (recall target unattainable in sweep)",
+            "threshold": 0.9,
+            "precision": 0.5043495036655091,
+            "recall": 0.547773248504705,
+            "f1": 0.5251652726542241
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.4905161532425886,
+              "recall": 0.547773248504705,
+              "f1": 0.5175659623483676,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29869
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.4910941475826972,
+              "recall": 0.547773248504705,
+              "f1": 0.5178875332042682,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29800
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.49113608416450333,
+              "recall": 0.547773248504705,
+              "f1": 0.5179108509680325,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29795
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.4911528608027327,
+              "recall": 0.547773248504705,
+              "f1": 0.5179201786614798,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29793
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.4918585160606164,
+              "recall": 0.547773248504705,
+              "f1": 0.5183122454129268,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29709
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.4940216457653324,
+              "recall": 0.547773248504705,
+              "f1": 0.519510785128446,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29453
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.494106529209622,
+              "recall": 0.547773248504705,
+              "f1": 0.5195577155865508,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29443
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.4977240078231822,
+              "recall": 0.547773248504705,
+              "f1": 0.5215506687825889,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 29020
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.5043495036655091,
+              "recall": 0.547773248504705,
+              "f1": 0.5251652726542241,
+              "TP": 28757,
+              "FN": 23741,
+              "FP": 28261
+            }
+          ]
+        },
+        "active": {
+          "status": "ok",
+          "n": 157869,
+          "botnet_flows": 36405,
+          "benign_flows": 121464,
+          "mean_prob_true_botnet": 0.7899189591407776,
+          "mean_prob_true_benign": 0.23755952715873718,
+          "at_train_threshold": {
+            "threshold": 0.7732671499252319,
+            "precision": 0.5002783480045927,
+            "recall": 0.7899189671748387,
+            "f1": 0.6125874721739965,
+            "auc_roc": 0.7768764936519597,
+            "tp": 28757,
+            "fn": 7648,
+            "fp": 28725,
+            "tn": 92739
+          },
+          "best_in_sweep": {
+            "basis": "max F1 (recall target unattainable in sweep)",
+            "threshold": 0.9,
+            "precision": 0.5043583492642545,
+            "recall": 0.7899189671748387,
+            "f1": 0.6156365738262936
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.4966580888067564,
+              "recall": 0.7899189671748387,
+              "f1": 0.6098657561554938,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 29144
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.49724205903204055,
+              "recall": 0.7899189671748387,
+              "f1": 0.6103058214308453,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 29076
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.4972850522238362,
+              "recall": 0.7899189671748387,
+              "f1": 0.6103382042384303,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 29071
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.4972936517543708,
+              "recall": 0.7899189671748387,
+              "f1": 0.610344681212327,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 29070
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.4979136005540646,
+              "recall": 0.7899189671748387,
+              "f1": 0.6108113848768054,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 28998
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.5000869504730105,
+              "recall": 0.7899189671748387,
+              "f1": 0.6124439617076105,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 28747
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.5001391352742705,
+              "recall": 0.7899189671748387,
+              "f1": 0.6124830942568396,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 28741
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.5008098082583027,
+              "recall": 0.7899189671748387,
+              "f1": 0.612985739560463,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 28664
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.5043583492642545,
+              "recall": 0.7899189671748387,
+              "f1": 0.6156365738262936,
+              "TP": 28757,
+              "FN": 7648,
+              "FP": 28260
+            }
+          ]
+        },
+        "empty": {
+          "status": "ok",
+          "n": 42131,
+          "botnet_flows": 16093,
+          "benign_flows": 26038,
+          "mean_prob_true_botnet": 5.142682317519889e-36,
+          "mean_prob_true_benign": 0.02185872010886669,
+          "at_train_threshold": {
+            "threshold": 0.7732671499252319,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "auc_roc": 0.4592030307820737,
+            "tp": 0,
+            "fn": 16093,
+            "fp": 525,
+            "tn": 25513
+          },
+          "best_in_sweep": {
+            "basis": "max F1 (recall target unattainable in sweep)",
+            "threshold": 0.1,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 725
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 724
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 724
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 723
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 711
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 706
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 702
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 356
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.0,
+              "recall": 0.0,
+              "f1": 0.0,
+              "TP": 0,
+              "FN": 16093,
+              "FP": 1
+            }
+          ]
+        }
+      }
+    },
+    {
+      "arch": "lstm-only",
+      "status": "ok",
+      "model_path": "/Users/zeyadalghamdi/Desktop/Graduation Project/evaluation/lstm_test/results/noniot/model.pt",
+      "model_type": "lstm_only",
+      "n_features": 46,
+      "seq_len": 20,
+      "strata": {
+        "all": {
+          "status": "ok",
+          "n": 200000,
+          "botnet_flows": 52498,
+          "benign_flows": 147502,
+          "mean_prob_true_botnet": 0.7907930612564087,
+          "mean_prob_true_benign": 0.7387165427207947,
+          "at_train_threshold": {
+            "threshold": 0.7376086711883545,
+            "precision": 0.27860974215155065,
+            "recall": 0.7796487485237533,
+            "f1": 0.41051924214918306,
+            "auc_roc": 0.45307246761338327,
+            "tp": 40930,
+            "fn": 11568,
+            "fp": 105978,
+            "tn": 41524
+          },
+          "best_in_sweep": {
+            "basis": "recall>=0.85, max precision",
+            "threshold": 0.2,
+            "precision": 0.29266658967548215,
+            "recall": 0.965446302716294,
+            "f1": 0.4491709426705306
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.28700558596174464,
+              "recall": 0.9689131014514839,
+              "f1": 0.4428367460649115,
+              "TP": 50866,
+              "FN": 1632,
+              "FP": 126364
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.29266658967548215,
+              "recall": 0.965446302716294,
+              "f1": 0.4491709426705306,
+              "TP": 50684,
+              "FN": 1814,
+              "FP": 122496
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.27218967277677836,
+              "recall": 0.8530801173378033,
+              "f1": 0.41270031423647907,
+              "TP": 44785,
+              "FN": 7713,
+              "FP": 119751
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.2626962230044715,
+              "recall": 0.78894434073679,
+              "f1": 0.3941512064445216,
+              "TP": 41418,
+              "FN": 11080,
+              "FP": 116247
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.2636369447107702,
+              "recall": 0.7856680254485885,
+              "f1": 0.39479679154622205,
+              "TP": 41246,
+              "FN": 11252,
+              "FP": 115204
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.27207512457894634,
+              "recall": 0.7831345956036421,
+              "f1": 0.40384662609831684,
+              "TP": 41113,
+              "FN": 11385,
+              "FP": 109996
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.2758513931888545,
+              "recall": 0.7807154558268886,
+              "f1": 0.40766269805747024,
+              "TP": 40986,
+              "FN": 11512,
+              "FP": 107594
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.2833103101846038,
+              "recall": 0.773515181530725,
+              "f1": 0.4147228236447567,
+              "TP": 40608,
+              "FN": 11890,
+              "FP": 102726
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.2889083150595626,
+              "recall": 0.7428473465655835,
+              "f1": 0.4160186044526941,
+              "TP": 38998,
+              "FN": 13500,
+              "FP": 95986
+            }
+          ]
+        },
+        "active": {
+          "status": "ok",
+          "n": 157869,
+          "botnet_flows": 36405,
+          "benign_flows": 121464,
+          "mean_prob_true_botnet": 0.7246480584144592,
+          "mean_prob_true_benign": 0.7029755115509033,
+          "at_train_threshold": {
+            "threshold": 0.7376086711883545,
+            "precision": 0.23438650133061548,
+            "recall": 0.6822414503502267,
+            "f1": 0.3489053248203637,
+            "auc_roc": 0.4663686635644143,
+            "tp": 24837,
+            "fn": 11568,
+            "fp": 81129,
+            "tn": 40335
+          },
+          "best_in_sweep": {
+            "basis": "recall>=0.85, max precision",
+            "threshold": 0.2,
+            "precision": 0.2619399198830808,
+            "recall": 0.9501716797143249,
+            "f1": 0.41066828127411525
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.2556311935777928,
+              "recall": 0.9551709929954677,
+              "f1": 0.4033218699436883,
+              "TP": 34773,
+              "FN": 1632,
+              "FP": 101255
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.2619399198830808,
+              "recall": 0.9501716797143249,
+              "f1": 0.41066828127411525,
+              "TP": 34591,
+              "FN": 1814,
+              "FP": 97466
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.23225430437844533,
+              "recall": 0.7881334981458591,
+              "f1": 0.35878005777094196,
+              "TP": 28692,
+              "FN": 7713,
+              "FP": 94845
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.21702430329414185,
+              "recall": 0.6956462024447191,
+              "f1": 0.3308360059308804,
+              "TP": 25325,
+              "FN": 11080,
+              "FP": 91367
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.21778620534400056,
+              "recall": 0.6909215767064963,
+              "f1": 0.33118058710063925,
+              "TP": 25153,
+              "FN": 11252,
+              "FP": 90341
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.22712212125888473,
+              "recall": 0.6872682323856613,
+              "f1": 0.3414161538146637,
+              "TP": 25020,
+              "FN": 11385,
+              "FP": 85141
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.2312680583814116,
+              "recall": 0.6837797005905782,
+              "f1": 0.34563530081504007,
+              "TP": 24893,
+              "FN": 11512,
+              "FP": 82744
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.23940897283150062,
+              "recall": 0.6733965114682049,
+              "f1": 0.353234440177806,
+              "TP": 24515,
+              "FN": 11890,
+              "FP": 77883
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.24350960005103017,
+              "recall": 0.6291718170580964,
+              "f1": 0.35112327255167974,
+              "TP": 22905,
+              "FN": 13500,
+              "FP": 71157
+            }
+          ]
+        },
+        "empty": {
+          "status": "ok",
+          "n": 42131,
+          "botnet_flows": 16093,
+          "benign_flows": 26038,
+          "mean_prob_true_botnet": 0.9404239654541016,
+          "mean_prob_true_benign": 0.9054442644119263,
+          "at_train_threshold": {
+            "threshold": 0.7376086711883545,
+            "precision": 0.39306824288017195,
+            "recall": 1.0,
+            "f1": 0.5643201542912247,
+            "auc_roc": 0.30897024194003475,
+            "tp": 16093,
+            "fn": 0,
+            "fp": 24849,
+            "tn": 1189
+          },
+          "best_in_sweep": {
+            "basis": "recall>=0.85, max precision",
+            "threshold": 0.9,
+            "precision": 0.3932603489565515,
+            "recall": 1.0,
+            "f1": 0.5645181092694905
+          },
+          "sweep": [
+            {
+              "threshold": 0.1,
+              "precision": 0.39058783554196397,
+              "recall": 1.0,
+              "f1": 0.561759315821625,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 25109
+            },
+            {
+              "threshold": 0.2,
+              "precision": 0.3913381805802106,
+              "recall": 1.0,
+              "f1": 0.5625349552572707,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 25030
+            },
+            {
+              "threshold": 0.3,
+              "precision": 0.3925217688236298,
+              "recall": 1.0,
+              "f1": 0.5637567435017166,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24906
+            },
+            {
+              "threshold": 0.4,
+              "precision": 0.392770849095746,
+              "recall": 1.0,
+              "f1": 0.5640135982896997,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24880
+            },
+            {
+              "threshold": 0.5,
+              "precision": 0.3929338802617443,
+              "recall": 1.0,
+              "f1": 0.5641816683903311,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24863
+            },
+            {
+              "threshold": 0.6,
+              "precision": 0.3930106476506789,
+              "recall": 1.0,
+              "f1": 0.5642607948668502,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24855
+            },
+            {
+              "threshold": 0.7,
+              "precision": 0.39305864250299194,
+              "recall": 1.0,
+              "f1": 0.5643102601865488,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24850
+            },
+            {
+              "threshold": 0.8,
+              "precision": 0.39312585499316005,
+              "recall": 1.0,
+              "f1": 0.5643795262059654,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24843
+            },
+            {
+              "threshold": 0.9,
+              "precision": 0.3932603489565515,
+              "recall": 1.0,
+              "f1": 0.5645181092694905,
+              "TP": 16093,
+              "FN": 0,
+              "FP": 24829
+            }
+          ]
+        }
+      }
+    }
+  ]
+}
