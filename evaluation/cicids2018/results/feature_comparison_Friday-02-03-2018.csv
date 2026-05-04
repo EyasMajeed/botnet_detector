@@ -1,0 +1,13 @@
+feature,tp_median,fn_median,tp_p90,fn_p90,ratio_median
+Flow Duration,10894.0,504.0,12858.300000000003,655.0,21.615079365079364
+Tot Fwd Pkts,3.0,2.0,3.0,2.0,1.5
+Tot Bwd Pkts,4.0,0.0,4.0,0.0,inf
+TotLen Fwd Pkts,326.0,0.0,326.0,0.0,inf
+TotLen Bwd Pkts,129.0,0.0,129.0,0.0,inf
+Flow Byts/s,41762.27627,0.0,46618.85246,0.0,inf
+Flow Pkts/s,642.7915519,3968.253968,717.8750897,4319.654428,0.16198347108916694
+Fwd Pkt Len Mean,108.6666667,0.0,108.6666667,0.0,inf
+Bwd Pkt Len Mean,32.25,0.0,32.25,0.0,inf
+SYN Flag Cnt,0.0,0.0,0.0,0.0,inf
+ACK Flag Cnt,0.0,1.0,0.0,1.0,0.0
+Init Fwd Win Byts,8192.0,2052.0,8192.0,2052.0,3.992202729044834
