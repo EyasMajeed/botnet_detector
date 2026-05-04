@@ -1,0 +1,12 @@
+{
+  "accuracy": 0.9940265262731599,
+  "precision": 0.9974973656480506,
+  "recall": 0.9870959332638165,
+  "f1": 0.992269392033543,
+  "auc_roc": 0.9997941270798311,
+  "threshold": 0.7376086711883545,
+  "model_type": "lstm_only",
+  "branch": "noniot",
+  "n_parameters": 230529,
+  "n_features": 46
+}

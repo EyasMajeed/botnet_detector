@@ -1,0 +1,7 @@
+model,branch,model_type,accuracy,precision,recall,f1,auc_roc,threshold,n_parameters,source,available
+Hybrid CNN-LSTM,iot,hybrid,0.9991,0.999,0.9996,0.9993,0.9998,0.29,,models/stage2/results/iot_metrics.json,True
+Hybrid CNN-LSTM,noniot,hybrid,0.9953933380581148,0.9962036915826679,0.9919186652763295,0.9940565606426752,0.9998161783426738,0.7656164169311523,,models/stage2/results/noniot_metrics.json,True
+CNN-only,iot,cnn_only,,,,,,,,evaluation/cnn_test/results/iot/metrics.json,False
+CNN-only,noniot,cnn_only,0.9955452060342209,0.9960753532182104,0.9924400417101147,0.9942543745103161,0.9997124273667649,0.7732671499252319,133633.0,evaluation/cnn_test/results/noniot/metrics.json,True
+LSTM-only,iot,lstm_only,,,,,,,,evaluation/lstm_test/results/iot/metrics.json,False
+LSTM-only,noniot,lstm_only,0.9940265262731599,0.9974973656480506,0.9870959332638165,0.992269392033543,0.9997941270798311,0.7376086711883545,230529.0,evaluation/lstm_test/results/noniot/metrics.json,True

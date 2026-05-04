@@ -1,0 +1,12 @@
+{
+  "accuracy": 0.9955452060342209,
+  "precision": 0.9960753532182104,
+  "recall": 0.9924400417101147,
+  "f1": 0.9942543745103161,
+  "auc_roc": 0.9997124273667649,
+  "threshold": 0.7732671499252319,
+  "model_type": "cnn_only",
+  "branch": "noniot",
+  "n_parameters": 133633,
+  "n_features": 46
+}
