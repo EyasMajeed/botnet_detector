@@ -91,6 +91,17 @@ except ImportError:
     _KITSUNE_OK = False
     KITSUNE_FEATURE_NAMES: List[str] = []
 
+# ── OUI lookup (Path 3 — MAC-based device fingerprinting) ────────────────────
+# Optional. If oui_lookup.py and the manuf package are both present, Stage-1
+# uses MAC vendor as a high-confidence pre-classifier (overriding ML when
+# the vendor is unambiguous). If unavailable, Stage-1 falls back to ML only
+# (legacy behavior). No retraining required.
+try:
+    from oui_lookup import OUIClassifier
+    _OUI_OK = True
+except ImportError:
+    _OUI_OK = False
+
 
 # ══════════════════════════════════════════════════════════════════════════════
 # LOGGING
@@ -98,7 +109,7 @@ except ImportError:
 
 logging.basicConfig(
     level=logging.INFO,
-    format="%(asctime)s [%(levelname)s] %(name)s — %(message)s",
+    format="%(asctime)s [%(levelname)s] %(name)s - %(message)s",
     datefmt="%H:%M:%S",
     handlers=[
         logging.StreamHandler(sys.stdout),
@@ -154,6 +165,33 @@ RISKY_PORTS    = {23, 2323, 1900, 7547, 5555}
 # replaced with this value at load time.  0.50 is the statistical decision
 # boundary for a binary sigmoid and is the correct default for an uncalibrated model.
 NONIOT_THRESHOLD_OVERRIDE: float = 0.50
+
+# ── Stage-1 IoT routing threshold ─────────────────────────────────────────────
+# Probability threshold above which a flow is routed to the Stage-2 IoT
+# pipeline. At τ=0.5 (statistical decision boundary), Stage-1 was over-
+# routing real-world workstation/CDN traffic to IoT. Offline threshold
+# sweep on detection_results.csv showed:
+#   τ = 0.50  →  Mac 61.6% correct (baseline)
+#   τ = 0.65  →  Mac 97.8% correct
+#   τ = 0.70  →  Mac 99.0% correct  ← captures 99% of achievable gain
+#   τ = 0.75  →  Mac 99.3% correct  (diminishing returns)
+# τ = 0.70 is the recommended deployment value.
+# Override at runtime via --iot-threshold CLI flag.
+IOT_ROUTING_THRESHOLD: float = 0.70
+
+# ── Stage-1 OUI fingerprinting (Path 3) ───────────────────────────────────────
+# When a LAN device's MAC vendor is in the high-confidence OUI mapping
+# (oui_lookup.py), we override the ML prediction. Two thresholds:
+#   OUI_OVERRIDE_ALWAYS:  vendors with this confidence or higher always win
+#                         (ML output is ignored). Used for clear-cut vendors
+#                         like Apple/Microsoft/Nest.
+#   OUI_OVERRIDE_LOW_ML:  vendors with this confidence override only if the
+#                         ML model is in its uncertain range (0.50-0.70).
+#                         Used for ambiguous vendors like Amazon/Samsung
+#                         where the OUI is informative but not definitive.
+# Set to a value > 1.0 to disable that tier entirely.
+OUI_OVERRIDE_ALWAYS:   float = 0.90
+OUI_OVERRIDE_LOW_ML:   float = 0.70
 
 # ── Live scaler calibration ───────────────────────────────────────────────────
 # Number of completed NonIoT flows whose raw feature vectors are accumulated
@@ -258,6 +296,11 @@ class DetectionResult:
     s1_confidence: float; s2_confidence: float
     suspicion_score: float; latency_ms: float; alerted: bool
     timestamp: float = field(default_factory=time.time)
+    # Path 3: how Stage-1 reached its decision —
+    #   "ml"            → ML model only
+    #   "oui_always"    → high-confidence OUI override (Tier 1, conf >= 0.90)
+    #   "oui_low_ml"    → medium-confidence OUI broke an uncertain ML tie (Tier 2)
+    s1_method: str = "ml"
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -565,7 +608,7 @@ class Stage1Classifier:
             log.info("[Stage1] Scaler loaded: %s  (%d features)", scaler_path, len(self._features))
         else:
             log.warning(
-                "[Stage1] ⚠  s1_scaler.json not found at %s\n"
+                "[Stage1] [WARN] s1_scaler.json not found at %s\n"
                 "         The RF was trained on NORMALISED data. Running on raw\n"
                 "         live features will degrade Stage-1 accuracy.\n"
                 "         FIX: python3 export_s1_scaler.py  (takes ~10 seconds)",
@@ -583,13 +626,24 @@ class Stage1Classifier:
             row = (row - self._mean) / self._scale
         return row
 
-    def stage1_predict(self, feat: Dict[str, float]) -> Tuple[str, float]:
-        """Returns (decoded_string_label, confidence).
+    def stage1_predict(self, feat: Dict[str, float],
+                       src_mac: Optional[str] = None,
+                       oui: Optional["OUIClassifier"] = None,
+                       oui_stats: Optional[Dict[str, int]] = None
+                       ) -> Tuple[str, float, str]:
+        """Returns (decoded_string_label, confidence, method).
 
-        The predicted integer class index is decoded back to its original
-        string label via self._le.inverse_transform() when a LabelEncoder is
-        available.  This avoids hard-coding "iot"/"noniot" and remains correct
-        even if the encoder's class ordering changes between training runs.
+        method is one of: "ml", "oui_always", "oui_low_ml"
+
+        Decision flow:
+          1. Compute ML probability P(iot)
+          2. If MAC + OUIClassifier provided, look up vendor verdict
+          3. Override ML based on OUI confidence tier:
+               OUI conf >= OUI_OVERRIDE_ALWAYS  → use OUI verdict always
+               OUI conf >= OUI_OVERRIDE_LOW_ML  → use OUI only if ML uncertain
+                                                   (P in 0.50-IOT_ROUTING_THRESHOLD)
+               otherwise                         → use ML
+          4. Apply ML threshold IOT_ROUTING_THRESHOLD as before
         """
         # Remind user every 100 flows if scaler is missing:
         if not self._has_scaler:
@@ -602,28 +656,75 @@ class Stage1Classifier:
         proba    = self._rf.predict_proba(X)[0]          # shape: (n_classes,)
         iot_prob = float(proba[self._iot_idx])
 
-        if iot_prob >= 0.5:
-            predicted_int = self._iot_idx
-            confidence    = iot_prob
-        else:
-            # Index of the highest-probability non-IoT class
-            predicted_int = int(np.argmax(proba))
-            if predicted_int == self._iot_idx:
-                # Edge case: argmax still landed on IoT despite iot_prob < 0.5.
-                # Pick the next best class.
-                sorted_idx    = np.argsort(proba)[::-1]
-                predicted_int = int(next(i for i in sorted_idx if i != self._iot_idx))
-            confidence = float(proba[predicted_int])
+        # ── Path 3: MAC vendor pre-classifier ─────────────────────────────────
+        oui_verdict   : Optional[str] = None
+        oui_confidence: float         = 0.0
+        if oui is not None and src_mac:
+            oui_verdict, oui_confidence = oui.classify(src_mac)
+
+        method = "ml"  # default
+        used_oui_override = False
+        if oui_verdict is not None:
+            if oui_confidence >= OUI_OVERRIDE_ALWAYS:
+                used_oui_override = True
+                method = "oui_always"
+                if oui_stats is not None:
+                    oui_stats["override_always"] = oui_stats.get("override_always", 0) + 1
+                if oui_verdict == "iot":
+                    predicted_int = self._iot_idx
+                    confidence    = max(iot_prob, oui_confidence)
+                else:
+                    predicted_int = self._noniot_idx_or_argmax(proba)
+                    confidence    = max(float(proba[predicted_int]), oui_confidence)
+
+            elif (oui_confidence >= OUI_OVERRIDE_LOW_ML
+                  and 0.50 <= iot_prob < IOT_ROUTING_THRESHOLD):
+                used_oui_override = True
+                method = "oui_low_ml"
+                if oui_stats is not None:
+                    oui_stats["override_low_ml"] = oui_stats.get("override_low_ml", 0) + 1
+                if oui_verdict == "iot":
+                    predicted_int = self._iot_idx
+                    confidence    = oui_confidence
+                else:
+                    predicted_int = self._noniot_idx_or_argmax(proba)
+                    confidence    = oui_confidence
+
+        # ── ML-only path ──────────────────────────────────────────────────────
+        if not used_oui_override:
+            if oui_stats is not None:
+                oui_stats["ml_only"] = oui_stats.get("ml_only", 0) + 1
+            if iot_prob >= IOT_ROUTING_THRESHOLD:
+                predicted_int = self._iot_idx
+                confidence    = iot_prob
+            else:
+                predicted_int = int(np.argmax(proba))
+                if predicted_int == self._iot_idx:
+                    sorted_idx    = np.argsort(proba)[::-1]
+                    predicted_int = int(next(i for i in sorted_idx if i != self._iot_idx))
+                confidence = float(proba[predicted_int])
 
         # Decode integer → original string label
         if self._le is not None:
             label: str = str(self._le.inverse_transform([predicted_int])[0])
         else:
-            # No encoder: rf.classes_ may already hold strings, or ints
             raw   = self._rf.classes_[predicted_int]
             label = str(raw)
 
-        return label, confidence
+        return label, confidence, method
+
+    def _noniot_idx_or_argmax(self, proba: np.ndarray) -> int:
+        """
+        Return the index of the highest-probability NON-IoT class.
+        Used when OUI says 'noniot' but we still need a class index for
+        the LabelEncoder.
+        """
+        sorted_idx = np.argsort(proba)[::-1]
+        for i in sorted_idx:
+            if int(i) != self._iot_idx:
+                return int(i)
+        # Fallback (binary case where iot is the only class — shouldn't happen)
+        return self._iot_idx
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -670,7 +771,7 @@ class Stage2IoTDetector:
         self._feat_max = np.array(sc["max"], dtype=np.float32)
         if self._feat_max.max() < 2.0:
             raise ValueError(
-                "iot_scaler.json is from already-normalised data (max ≤ 1.0). "
+                "iot_scaler.json is from already-normalised data (max <= 1.0). "
                 "Re-run preprocess_nbaiot.py to get the raw-range scaler."
             )
         denom = self._feat_max - self._feat_min
@@ -757,7 +858,7 @@ class LiveScalerCalibrator:
         self._buf: deque = deque(maxlen=n_target)
         self._done      = False
         log.info(
-            "[Calibration] LiveScalerCalibrator initialised — will fit on %d NonIoT flows. "
+            "[Calibration] LiveScalerCalibrator initialised - will fit on %d NonIoT flows. "
             "Live scaler will be saved to: %s",
             n_target, out_path,
         )
@@ -969,11 +1070,11 @@ class Stage2NonIoTDetector:
                      float(self._s2_scale.min()), float(self._s2_scale.max()))
         else:
             log.warning(
-                "[Stage2-NonIoT] ⚠  No scaler found.\n"
+                "[Stage2-NonIoT] [WARN] No scaler found.\n"
                 "         Checked (1) %s  [live-calibrated, preferred]\n"
                 "                  (2) %s  [static export]\n"
                 "         The CNN-LSTM was trained on NORMALISED data. Running on\n"
-                "         raw live features will collapse sigmoid outputs (~87%% → 0.0).\n"
+                "         raw live features will collapse sigmoid outputs (~87%% -> 0.0).\n"
                 "         LiveScalerCalibrator will auto-generate option (1) after\n"
                 "         %d NonIoT flows have been observed. Restart to apply it.",
                 live_scaler_path, scaler_path, N_CALIBRATION_FLOWS,
@@ -986,7 +1087,7 @@ class Stage2NonIoTDetector:
         if live_scaler_path.exists():
             # Mark calibration as complete so record() becomes a no-op.
             self._calibrator._done = True
-            log.info("[Calibration] Live scaler already exists — calibrator disabled.")
+            log.info("[Calibration] Live scaler already exists - calibrator disabled.")
 
     def stage2_preprocess_non_iot(self, feat: Dict[str, float]) -> np.ndarray:
         """
@@ -1166,9 +1267,9 @@ class BotnetMonitor:
                  s2_iot_scaler_path: Path = SCALER_S2_IOT,
                  s2_noniot_path:     Path = MODEL_S2_NONIOT):
 
-        log.info("═" * 60)
+        log.info("=" * 60)
         log.info("  Initialising BotnetMonitor")
-        log.info("═" * 60)
+        log.info("=" * 60)
 
         if not _KITSUNE_OK:
             raise ImportError(
@@ -1180,6 +1281,29 @@ class BotnetMonitor:
         self._iot_bufs:    Dict[str, deque] = defaultdict(lambda: deque(maxlen=IOT_SEQ_LEN))
         self._noniot_bufs: Dict[str, deque] = defaultdict(lambda: deque(maxlen=NONIOT_SEQ_LEN))
         self.aggregator  = FlowAggregator()
+
+        # IP → MAC lookup table populated by process_packet. Stage-1 reads
+        # this to attempt MAC-based device fingerprinting (Path 3) before
+        # falling back to the ML model. We trim it periodically so it
+        # doesn't grow unbounded on busy networks.
+        self._ip_to_mac:   Dict[str, str]   = {}
+        self._ip_to_mac_max = 1000   # keep last N unique IP→MAC mappings
+
+        # OUI classifier — optional. If oui_lookup module + manuf package
+        # aren't available, we fall back to ML-only routing.
+        if _OUI_OK:
+            try:
+                self.oui = OUIClassifier()
+                log.info("[Stage1] OUI classifier enabled (Path 3 - MAC fingerprinting)")
+            except Exception as e:
+                log.warning("[Stage1] OUI classifier failed to initialise: %s", e)
+                self.oui = None
+        else:
+            self.oui = None
+            log.info("[Stage1] OUI classifier disabled "
+                     "(install: pip install manuf, ensure oui_lookup.py is on PYTHONPATH)")
+        # Counters for OUI override tracking
+        self._stats_oui = {"override_always": 0, "override_low_ml": 0, "ml_only": 0}
 
         # Stage-1: scaler is OPTIONAL — warns but does not crash if missing.
         self.s1        = Stage1Classifier(s1_model_path, s1_scaler_path)
@@ -1201,6 +1325,17 @@ class BotnetMonitor:
                        proto: int, pkt_len: int, ttl: int,
                        src_mac: str = "", tcp_flags: int = 0) -> Optional[DetectionResult]:
         self._stats["packets"] += 1
+
+        # ── Track src_ip → src_mac mapping for Stage-1 OUI lookup (Path 3) ────
+        # We only see Layer-2 MACs for LAN-side devices (external IPs route
+        # through the local gateway, whose MAC is the LAN gateway's, not
+        # the actual remote host's). So this table only contains LAN devices
+        # — which is exactly the device set we want to fingerprint.
+        if src_mac and src_ip not in self._ip_to_mac:
+            if len(self._ip_to_mac) >= self._ip_to_mac_max:
+                # Evict oldest entry (Python 3.7+ dicts preserve insertion order)
+                self._ip_to_mac.pop(next(iter(self._ip_to_mac)))
+            self._ip_to_mac[src_ip] = src_mac
 
         # ── Kitsune: silent per-packet accumulation ───────────────────────────
         # Runs on every packet regardless of device type. No inference fires
@@ -1244,7 +1379,14 @@ class BotnetMonitor:
             log.info("  [!] Suspicious flow %s (score=%.1f)", str(rec.key), susp)
 
         # ── Stage-1: IoT vs Non-IoT routing ──────────────────────────────────
-        device_type, s1_conf = self.s1.stage1_predict(feat)
+        # Look up the MAC address for this flow's LAN-side IP. Prefer ip_lo
+        # since Stage-2 indexes by it; fall back to ip_hi if needed (one of
+        # them must be the LAN device for the MAC table to have hit it).
+        src_mac = self._ip_to_mac.get(rec.key.ip_lo)
+        if not src_mac:
+            src_mac = self._ip_to_mac.get(rec.key.ip_hi)
+        device_type, s1_conf, s1_method = self.s1.stage1_predict(
+            feat, src_mac=src_mac, oui=self.oui, oui_stats=self._stats_oui)
 
         # ── Stage-2: gated by Stage-1 result ─────────────────────────────────
         if device_type == "iot":
@@ -1255,7 +1397,7 @@ class BotnetMonitor:
             self._stats["iot"] += 1
             buf = self._iot_bufs[src_ip]
             if len(buf) < IOT_SEQ_LEN:
-                log.debug("  [IoT] %-18s Kitsune buffer not full yet (%d/%d) — deferring",
+                log.debug("  [IoT] %-18s Kitsune buffer not full yet (%d/%d) - deferring",
                           src_ip, len(buf), IOT_SEQ_LEN)
                 return None
             seq = np.stack(list(buf))   # (IOT_SEQ_LEN, 115) — real temporal sequence
@@ -1279,6 +1421,7 @@ class BotnetMonitor:
             s1_confidence=round(s1_conf, 4), s2_confidence=round(s2_conf, 4),
             suspicion_score=round(susp, 2), latency_ms=round(lat_ms, 2),
             alerted=alerted, timestamp=rec.last_seen,
+            s1_method=s1_method,
         )
         self._results.append(result)
         log.debug("  [Flow] %-22s dev=%-6s label=%-7s s1=%.2f s2=%.2f lat=%.1fms",
@@ -1293,13 +1436,13 @@ class BotnetMonitor:
             return False
         self._last_alert[src_ip] = now
         self._stats["alerts"] += 1
-        log.warning("  🚨 ALERT  %-20s  device=%-6s  label=BOTNET  conf=%.3f",
+        log.warning("  [ALERT]  %-20s  device=%-6s  label=BOTNET  conf=%.3f",
                     src_ip, device_type, conf)
         return True
 
     def print_summary(self, final: bool = False) -> None:
         s   = self._stats
-        tag = "FINAL SUMMARY" if final else "── Stats ──"
+        tag = "FINAL SUMMARY" if final else "-- Stats --"
         log.info(
             "%s  pkts=%d  flows=%d  IoT=%d  NonIoT=%d  "
             "botnet=%d  benign=%d  alerts=%d  suspicious=%d",
@@ -1307,13 +1450,25 @@ class BotnetMonitor:
             s["iot"], s["noniot"], s["botnet"], s["benign"],
             s["alerts"], s["suspicious_flows"],
         )
+        # OUI breakdown if Path 3 is active
+        if self.oui is not None and final:
+            o = self._stats_oui
+            total = o.get("override_always", 0) + o.get("override_low_ml", 0) + o.get("ml_only", 0)
+            if total > 0:
+                log.info(
+                    "  [Stage-1 routing breakdown]  ml_only=%d (%.1f%%)  "
+                    "oui_always=%d (%.1f%%)  oui_low_ml=%d (%.1f%%)",
+                    o.get("ml_only", 0), o.get("ml_only", 0) / total * 100,
+                    o.get("override_always", 0), o.get("override_always", 0) / total * 100,
+                    o.get("override_low_ml", 0), o.get("override_low_ml", 0) / total * 100,
+                )
 
     def save_results(self, path: str = "detection_results.csv") -> None:
         if not self._results:
             log.info("No results to save.")
             return
         pd.DataFrame([vars(r) for r in self._results]).to_csv(path, index=False)
-        log.info("Results saved → %s (%d rows)", path, len(self._results))
+        log.info("Results saved -> %s (%d rows)", path, len(self._results))
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1430,8 +1585,14 @@ def run_simulation(monitor: BotnetMonitor, n_packets: int = 2000,
 # ══════════════════════════════════════════════════════════════════════════════
 
 def main() -> None:
+    # Declare module-level names that may be rebound below. This MUST be
+    # the first statement of main() because the f-string in --iot-threshold's
+    # help= reads IOT_ROUTING_THRESHOLD, and `global` declarations must
+    # precede ANY reference to the named variable inside the function.
+    global IOT_ROUTING_THRESHOLD, _OUI_OK
+
     ap = argparse.ArgumentParser(
-        description="Group 07 — Live Botnet Detection Pipeline",
+        description="Group 07 - Live Botnet Detection Pipeline",
         formatter_class=argparse.RawDescriptionHelpFormatter,
         epilog="""
 Quick-start:
@@ -1451,10 +1612,32 @@ Environment overrides:
     ap.add_argument("--n-pkts",  type=int,   default=2000)
     ap.add_argument("--output",  type=str,   default="detection_results.csv")
     ap.add_argument("--debug",   action="store_true")
+    ap.add_argument("--iot-threshold", type=float, default=None,
+                    help=f"Override Stage-1 IoT routing threshold "
+                         f"(default: {IOT_ROUTING_THRESHOLD}). "
+                         f"Lower = more flows routed to IoT pipeline.")
+    ap.add_argument("--no-oui", action="store_true",
+                    help="Disable Path-3 MAC fingerprinting and use ML only "
+                         "(useful for ablation studies).")
     args = ap.parse_args()
 
     if args.debug:
         logging.getLogger().setLevel(logging.DEBUG)
+
+    # Apply IoT threshold override BEFORE constructing BotnetMonitor.
+    if args.iot_threshold is not None:
+        if not (0.0 < args.iot_threshold < 1.0):
+            ap.error(f"--iot-threshold must be in (0,1); got {args.iot_threshold}")
+        log.info("[Config] Stage-1 IoT routing threshold overridden: "
+                 "%.3f -> %.3f", IOT_ROUTING_THRESHOLD, args.iot_threshold)
+        IOT_ROUTING_THRESHOLD = args.iot_threshold
+    else:
+        log.info("[Config] Stage-1 IoT routing threshold: %.3f (default)",
+                 IOT_ROUTING_THRESHOLD)
+
+    if args.no_oui:
+        _OUI_OK = False
+        log.info("[Config] OUI fingerprinting disabled by --no-oui")
 
     monitor = BotnetMonitor()
 
