@@ -91,6 +91,10 @@ class DetectionFlow:
     source:        str   = "live"        # "live" | "upload"
     source_file:   str   = ""            # filename when source == "upload"
     report_id:     str   = ""
+    # XAI explanation — None if XAI was disabled, label is benign/unknown,
+    # or the explainer failed gracefully. Shape matches src.xai.explain_flow()'s
+    # return value.
+    xai:           Optional[dict] = None
 
 
 @dataclass

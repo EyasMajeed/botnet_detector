@@ -654,24 +654,63 @@ class ResultsPage(QWidget):
         self.df["lbl"].setStyleSheet(
             f"color:{ERR if ib else OK};background:transparent;font-weight:bold;")
         self.df["conf"].setText(f"{f.confidence:.2f}")
-        # XAI panel: per requirement, weights remain mock.
+
+        # ── XAI panel ─────────────────────────────────────────────────────
+        # Real XAI when available (f.xai is a dict from src.xai.explain_flow);
+        # mock data otherwise (legacy rows from before XAI was wired in, or
+        # benign flows where we don't run the explainer to save compute).
+        xai = getattr(f, "xai", None)
         if self.settings.xai_enabled:
-            self.xai.data = XAI_BOT if ib else XAI_BEN
+            if isinstance(xai, dict) and xai.get("feature_importance"):
+                # Real attributions — feature_importance is dict[name → magnitude]
+                # exactly the shape HBar expects.
+                self.xai.data = xai["feature_importance"]
+            else:
+                # Fallback: mock weights (keeps the panel non-empty for benign /
+                # legacy flows so the demo doesn't show an empty box).
+                self.xai.data = XAI_BOT if ib else XAI_BEN
             self.xai.update()
-        ex = ("High packet rate and repeated SYN packets detected. Periodic "
-              "beaconing consistent with C&C. Recommend blocking source IP."
-              if ib else
-              "Flow appears normal. Packet rates and timing within baseline. "
-              "No suspicious patterns.")
+
+        # ── Explanation text & recommendations ────────────────────────────
+        if isinstance(xai, dict) and xai.get("summary"):
+            # Real XAI text. Format: <summary>\n\n<reasons (bulleted)>
+            ex_lines = [xai["summary"]]
+            reasons = xai.get("reasons") or []
+            if reasons:
+                ex_lines.append("")
+                ex_lines.extend(f"  · {r}" for r in reasons[:3])
+            ex = "\n".join(ex_lines)
+            sev = xai.get("severity", "low")
+            recs = xai.get("recommendations") or []
+            if recs:
+                # Show the FIRST recommendation in the chip (most actionable).
+                # The full list is available in the dict for CSV/PDF export.
+                self.rec_chip.setText(f"Recommended: {recs[0]}")
+                self.rec_chip.show()
+            else:
+                self.rec_chip.hide()
+        else:
+            # Fallback to mock text for benign flows / legacy rows.
+            ex = ("High packet rate and repeated SYN packets detected. Periodic "
+                  "beaconing consistent with C&C. Recommend blocking source IP."
+                  if ib else
+                  "Flow appears normal. Packet rates and timing within baseline. "
+                  "No suspicious patterns.")
+            sev = "high" if ib else "low"
+            if ib:
+                self.rec_chip.setText("Recommended action: block source IP")
+                self.rec_chip.show()
+            else:
+                self.rec_chip.hide()
+
         self.expl.setText(ex)
+        # Severity-coloured left border: red for high/critical, amber for
+        # medium, green for low/benign.
+        sev_color = {"critical": ERR, "high": ERR, "medium": WARN, "low": OK}.get(
+            sev, ERR if ib else OK)
         self.expl.setStyleSheet(
             f"color:{TM};background:{BG};border-left:3px solid "
-            f"{ERR if ib else OK};border-radius:4px;padding:8px 10px;")
-        if ib:
-            self.rec_chip.setText("Recommended action: block source IP")
-            self.rec_chip.show()
-        else:
-            self.rec_chip.hide()
+            f"{sev_color};border-radius:4px;padding:8px 10px;")
 
     def _clear_details(self):
         for k, w in self.df.items():
@@ -1042,6 +1081,7 @@ class MainWindow(QMainWindow):
                 device_type   = str(r.get("device_type", "noniot")),
                 s1_confidence = float(r.get("stage1_conf", 0.0)),
                 latency_ms    = float(r.get("latency_ms", 0.0)),
+                xai           = r.get("xai"),    # XAI explanation dict (or None)
             ))
         if not flows:
             return

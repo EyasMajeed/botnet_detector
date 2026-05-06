@@ -30,7 +30,7 @@ import sys
 import time
 from collections import defaultdict, deque
 from pathlib import Path
-from typing import Any, Dict, List
+from typing import Any, Dict, List, Optional
 
 import numpy as np
 import pandas as pd
@@ -56,6 +56,71 @@ _S1_FEATURES: List[str] = []
 _NONIOT_SEQ_LEN: int = 20
 
 USE_REAL_INFERENCE = True
+
+# ─── XAI integration ──────────────────────────────────────────────────────────
+# The XAI module produces per-flow feature attributions and human-readable
+# explanations. It's lazy-loaded the same way the models are — first call to
+# _get_xai_bundle() builds the explainers from the already-loaded wrappers.
+# If the import fails (e.g. shap not installed yet), we fall back to a no-op
+# so detection still works without XAI.
+_xai_bundle = None
+_xai_disabled_reason: str = ""
+
+
+def _get_xai_bundle():
+    """Lazy-build the ExplainerBundle on first use."""
+    global _xai_bundle, _xai_disabled_reason
+    if _xai_bundle is not None:
+        return _xai_bundle
+    if _xai_disabled_reason:
+        return None
+    try:
+        from src.xai import ExplainerBundle
+        # Pass the wrappers we've already loaded — the bundle reaches into
+        # their private attrs (._rf, ._model, etc.) for IG / SHAP.
+        _xai_bundle = ExplainerBundle(
+            stage1_classifier = _get_stage1(),
+            iot_detector      = None,                # IoT branch via PCAP path
+            noniot_detector   = _get_stage2_noniot(),
+        )
+        return _xai_bundle
+    except Exception as e:
+        _xai_disabled_reason = f"{type(e).__name__}: {e}"
+        print(f"[xai] ExplainerBundle init failed: {_xai_disabled_reason}. "
+              f"Detection will continue without explanations.")
+        return None
+
+
+def _attach_xai(result: Dict[str, Any], seq: np.ndarray) -> None:
+    """
+    Add an "xai" key to a result dict, IN-PLACE. Safe to call on any result
+    (benign, unknown, or botnet); we only run the explainer for actual botnet
+    detections to save compute (~50 ms per call).
+
+    `seq` is the (k, n_features) sliding window the bridge already built and
+    fed to stage2_predict — the SAME numpy array, no DataFrame round-trip.
+    """
+    if result.get("label") != "botnet":
+        result["xai"] = None
+        return
+    bundle = _get_xai_bundle()
+    if bundle is None:
+        result["xai"] = None
+        return
+    try:
+        from src.xai import explain_flow
+        result["xai"] = explain_flow(
+            seq,
+            stage1_label = result.get("device_type", "noniot"),
+            stage2_label = "botnet",
+            bundle       = bundle,
+            top_k        = 8,
+        )
+    except Exception as e:
+        # explain_flow() is supposed to never raise (it has its own try/except),
+        # but we double-belt-and-braces anyway because this is in the hot path.
+        print(f"[xai] explain_flow() unexpectedly raised: {e!r}")
+        result["xai"] = None
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -104,20 +169,30 @@ def run_inference(flow: Dict[str, Any]) -> Dict[str, Any]:
     s1 = _get_stage1()
     s2 = _get_stage2_noniot()
     feat = _flow_to_feat_dict(flow)
-    device, s1_conf = s1.stage1_predict(feat)
+    # stage1_predict returns 3-tuple (label, confidence, method) since the OUI
+    # override was added. We only use label & confidence here; the third value
+    # ("ml" / "oui_always" / "oui_low_ml") is for analytics in the live monitor.
+    device, s1_conf, _s1_method = s1.stage1_predict(feat)
+    seq: Optional[np.ndarray] = None
     if device == "noniot":
         row = s2.stage2_preprocess_non_iot(feat)
         seq = np.stack([row])
         label, s2_conf = s2.stage2_predict(seq)
     else:
         label, s2_conf = "unknown", 0.0
-    return {
+    result = {
         "label":       label,
         "confidence":  float(s2_conf),
         "device_type": device,
         "stage1_conf": float(s1_conf),
         "latency_ms":  round((time.perf_counter() - t0) * 1000, 2),
     }
+    # Attach XAI explanation only for botnet detections
+    if seq is not None:
+        _attach_xai(result, seq)
+    else:
+        result["xai"] = None
+    return result
 
 
 def run_file_inference(info: Any) -> List[Dict[str, Any]]:
@@ -200,11 +275,13 @@ def _run_csv_inference(info: Any) -> List[Dict[str, Any]]:
     for i, row in df.iterrows():
         feat = {c: _safe_float(row.get(c, 0.0)) for c in feats}
         try:
-            device, s1_conf = s1.stage1_predict(feat)
+            # 3-tuple unpack — see run_inference() above for context
+            device, s1_conf, _s1_method = s1.stage1_predict(feat)
         except Exception as e:
             device, s1_conf = "noniot", 0.0
             print(f"[run_file_inference] Stage-1 failed on row {i}: {e!r}")
 
+        seq: Optional[np.ndarray] = None
         if device == "noniot":
             try:
                 row_vec = s2.stage2_preprocess_non_iot(feat)
@@ -214,6 +291,7 @@ def _run_csv_inference(info: Any) -> List[Dict[str, Any]]:
                 label, s2_conf = s2.stage2_predict(seq)
             except Exception as e:
                 label, s2_conf = "unknown", 0.0
+                seq = None
                 print(f"[run_file_inference] Stage-2 NonIoT failed on row {i}: {e!r}")
         else:
             label, s2_conf = "unknown", 0.0
@@ -222,7 +300,7 @@ def _run_csv_inference(info: Any) -> List[Dict[str, Any]]:
         proto   = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(
             proto_n, str(proto_n) if proto_n else "—")
 
-        results.append({
+        result = {
             "row":         int(i) + 1,
             "src_ip":      str(row.get("src_ip", "") or ""),
             "dst_ip":      str(row.get("dst_ip", "") or ""),
@@ -233,7 +311,15 @@ def _run_csv_inference(info: Any) -> List[Dict[str, Any]]:
             "label":       label,
             "confidence":  float(s2_conf),
             "stage1_conf": float(s1_conf),
-        })
+        }
+        # Attach XAI for botnet detections only — saves compute on benign flows
+        # (which are the vast majority). _attach_xai handles all the safety:
+        # it no-ops for benign / unknown labels and never raises.
+        if seq is not None:
+            _attach_xai(result, seq)
+        else:
+            result["xai"] = None
+        results.append(result)
 
     avg_ms = round((time.perf_counter() - t0) * 1000 / max(len(results), 1), 2)
     for r in results:
