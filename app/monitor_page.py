@@ -403,6 +403,9 @@ class MonitorPage(QWidget):
                     suspicion     = float(flow.get("_suspicion", score)),
                     latency_ms    = self._last_latency,
                     alerted       = bool(flow.get("_alert", False)),
+                    # XAI explanation from monitor_bridge (None for benign /
+                    # when XAI is unavailable). Same shape as upload-path xai.
+                    xai           = flow.get("_xai"),
                 ))
             except Exception as _e:
                 # Never let a store hiccup kill live capture.

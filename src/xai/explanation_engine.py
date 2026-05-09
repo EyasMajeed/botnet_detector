@@ -71,11 +71,11 @@ The rule engine is deliberately simple — it asks "do the top-attributed
 features collectively look like (port scan / DDoS / C2 beacon / DNS tunnel)?"
 This avoids hallucinating explanations and keeps the output auditable.
 
-For Stage-2 IoT (Kitsune features), all five named patterns will not match
-because the feature names are entirely different (MI_dir_*, HH_*, HpHp_*,
-etc.). IoT detections fall through to GENERIC by design — the top-K
-attributed Kitsune features are still surfaced, just without a behavioural
-label. Adding IoT-specific patterns is a planned future extension.
+For Stage-2 IoT (Kitsune features), the rule engine auto-dispatches to a
+separate set of IoT-specific patterns (MIRAI_FLOOD, IOT_SCAN, SLOW_BEACON)
+based on the feature names in top_features. The dispatch happens in
+build_human_explanation() — flow-schema names route to the flow matchers,
+Kitsune-schema names route to the Kitsune matchers.
 """
 
 from __future__ import annotations
@@ -241,6 +241,157 @@ def _detect_brute_force(expl: LocalExplanation) -> float:
 
 
 # ══════════════════════════════════════════════════════════════════════
+# Kitsune-aware IoT pattern matchers
+# ══════════════════════════════════════════════════════════════════════
+# These run on Stage-2 IoT detections, where top_features are Kitsune
+# AfterImage statistics (MI_dir_*, H_*, HH_*, HH_jit_*, HpHp_*) rather
+# than the unified flow schema. The streams encode different views:
+#
+#   MI_dir : MAC+IP source rate                  (one device's send rate)
+#   H      : IP source rate                      (any device sharing the IP)
+#   HH     : channel src→dst                     (one host pair byte/pkt rate)
+#   HH_jit : jitter on the channel               (timing irregularity)
+#   HpHp   : socket src:port → dst:port          (one socket pair)
+#
+# Window suffixes encode the decay constant:
+#   L5     ≈ 100ms     (very recent)
+#   L3     ≈ 500ms
+#   L1     ≈ 1.5s
+#   L0.1   ≈ 10s
+#   L0.01  ≈ 1min      (long-tail, catches slow patterns)
+#
+# Reference: Mirsky et al. (2018), "Kitsune: An Ensemble of Autoencoders
+# for Online Network Intrusion Detection", NDSS Symposium.
+# ══════════════════════════════════════════════════════════════════════
+
+def _kitsune_topk_has_any(expl: LocalExplanation, prefixes: tuple[str, ...]) -> bool:
+    """True if ANY top-feature name starts with any of the given prefixes."""
+    for f in expl.top_features:
+        for p in prefixes:
+            if f.feature.startswith(p):
+                return True
+    return False
+
+
+def _kitsune_topk_attribution_sum(expl: LocalExplanation,
+                                   prefixes: tuple[str, ...]) -> float:
+    """Sum of |attribution| for top features whose names match any prefix."""
+    total = 0.0
+    for f in expl.top_features:
+        for p in prefixes:
+            if f.feature.startswith(p):
+                total += abs(f.attribution)
+                break
+    return total
+
+
+def _detect_mirai_flood(expl: LocalExplanation) -> float:
+    """
+    MIRAI_FLOOD — high recent send rate from one device + high channel byte
+    rate.  Mirai's signature: a single IoT device suddenly emits packets
+    at very high rate to one or a few destinations.
+
+    Top features should be dominated by:
+      · MI_dir_L5_* (recent send rate from this MAC+IP source)
+      · HH_L5_* / HH_L3_* (channel byte/packet rate over short windows)
+    A mature flood typically pushes BOTH of these to extreme values.
+    """
+    score = 0.0
+    # MI_dir_L5 dominant in attributions → this device is sending recently
+    if _kitsune_topk_has_any(expl, ("MI_dir_L5_", "MI_dir_L3_")):
+        score += 0.40
+    # Channel stats also dominant → the burst is concentrated on a channel
+    if _kitsune_topk_has_any(expl, ("HH_L5_", "HH_L3_", "HH_L1_")):
+        score += 0.30
+    # If MI_dir + HH together account for half the |attribution|, this is
+    # very likely a flood.
+    mi_dir_share = _kitsune_topk_attribution_sum(expl, ("MI_dir_",))
+    hh_share     = _kitsune_topk_attribution_sum(expl, ("HH_",))
+    total_share  = sum(abs(f.attribution) for f in expl.top_features) or 1.0
+    if (mi_dir_share + hh_share) / total_share >= 0.50:
+        score += 0.20
+    return min(score, 1.0)
+
+
+def _detect_iot_scan(expl: LocalExplanation) -> float:
+    """
+    IOT_SCAN — one IoT device probing many sockets. Distinct from a generic
+    port scan because the device's MAC is the same throughout. Signal:
+
+      · HpHp_L5 / HpHp_L3 weight is HIGH (many distinct socket pairs)
+      · MI_dir_L5 weight is LOWER than HpHp suggests (device isn't sending
+        a flood, it's sending probes — many small packets to many sockets)
+
+    The model picking up on HpHp_* features as the main contributors is
+    the strongest signal — a normal IoT device usually talks to one or two
+    backend sockets, not dozens.
+    """
+    score = 0.0
+    if _kitsune_topk_has_any(expl, ("HpHp_L5_", "HpHp_L3_")):
+        score += 0.45
+    # H_L5_weight high (lots of packets from this IP) is supportive but not
+    # conclusive — Mirai_flood also lights up H_L5. Distinguish via HpHp
+    # being among the TOP attributors, not just present.
+    if _kitsune_topk_has_any(expl, ("H_L5_", "H_L3_")):
+        score += 0.20
+    # Tie-breaker: HpHp share of attributions
+    hphp_share  = _kitsune_topk_attribution_sum(expl, ("HpHp_",))
+    total_share = sum(abs(f.attribution) for f in expl.top_features) or 1.0
+    if hphp_share / total_share >= 0.30:
+        score += 0.20
+    return min(score, 1.0)
+
+
+def _detect_slow_beacon(expl: LocalExplanation) -> float:
+    """
+    SLOW_BEACON — long-tail correlation in the channel pair, with low
+    jitter. Signature of a low-and-slow C2 beacon over a 1min window.
+
+      · HH_L0.01_* features dominant (long-window channel statistics)
+      · HH_jit_L0.01_* in the top — and the model attributes positively
+        to LOW jitter values (i.e., very regular timing)
+      · HH_L0.01_pcc (Pearson correlation between channel stats) high
+        means the two endpoints are exchanging tightly correlated traffic
+    """
+    score = 0.0
+    if _kitsune_topk_has_any(expl, ("HH_L0.01_", "HH_L0.1_")):
+        score += 0.40
+    if _kitsune_topk_has_any(expl, ("HH_jit_L0.01_", "HH_jit_L0.1_")):
+        score += 0.25
+    # Long-tail share dominance (L0.01 + L0.1 windows)
+    longtail = _kitsune_topk_attribution_sum(expl, ("HH_L0.01_", "HH_L0.1_",
+                                                     "HH_jit_L0.01_", "HH_jit_L0.1_"))
+    total_share = sum(abs(f.attribution) for f in expl.top_features) or 1.0
+    if longtail / total_share >= 0.40:
+        score += 0.20
+    return min(score, 1.0)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# Schema dispatch — flow-feature matchers vs Kitsune matchers
+# ══════════════════════════════════════════════════════════════════════
+# We auto-detect by looking at the top_features. Any Kitsune-style name
+# (matches one of the five stream prefixes followed by a window suffix)
+# means we're explaining a Stage-2 IoT detection. Flow names mean we're
+# explaining Stage-2 Non-IoT.
+#
+# Mixed case can't happen (the two stages have disjoint schemas), but
+# if it ever did we'd prefer Kitsune dispatch on tiebreak — IoT botnets
+# have specific attack patterns that flow features can't represent.
+
+_KITSUNE_PREFIXES = ("MI_dir_", "H_", "HH_", "HH_jit_", "HpHp_")
+
+
+def _is_kitsune_explanation(expl: LocalExplanation) -> bool:
+    """Returns True if the top features look like Kitsune AfterImage stats."""
+    for f in expl.top_features:
+        for p in _KITSUNE_PREFIXES:
+            if f.feature.startswith(p):
+                return True
+    return False
+
+
+# ══════════════════════════════════════════════════════════════════════
 # Pattern → text & recommendations
 # ══════════════════════════════════════════════════════════════════════
 
@@ -287,6 +438,34 @@ PATTERNS = {
             "Lock the targeted account(s) and require a password reset.",
             "Add the source IP to the deny-list and review for distributed brute-force attempts.",
             "Verify MFA is enforced on the targeted service.",
+        ],
+        "min_severity": "high",
+    },
+    # ── IoT (Kitsune-feature) patterns ─────────────────────────────────
+    "MIRAI_FLOOD": {
+        "summary": "Likely Mirai-style flood from an IoT device.",
+        "recommendations": [
+            "Isolate the source IoT device from the network — it is likely compromised.",
+            "Capture the device for forensics (firmware image / memory dump if possible).",
+            "Look for similar bursts from other IoT devices on the same VLAN — Mirai propagates laterally.",
+        ],
+        "min_severity": "critical",
+    },
+    "IOT_SCAN": {
+        "summary": "IoT device probing many sockets — likely worm propagation.",
+        "recommendations": [
+            "Quarantine the source IoT device — it appears to be scanning for new victims.",
+            "Block the device's outbound traffic at the gateway.",
+            "Audit other IoT devices for indicators of compromise (open Telnet/2323, default creds).",
+        ],
+        "min_severity": "high",
+    },
+    "SLOW_BEACON": {
+        "summary": "Low-and-slow IoT beacon — possible C2 over a long window.",
+        "recommendations": [
+            "Acquire a packet capture of the suspect device for offline analysis.",
+            "Look for similar long-window beacons across other IoT devices — C2 channels often persist.",
+            "If the destination resolves to a non-vendor domain, escalate to incident response.",
         ],
         "min_severity": "high",
     },
@@ -376,8 +555,10 @@ def _build_reasons(expl: LocalExplanation, max_reasons: int = 4) -> list[str]:
 
 def build_human_explanation(expl: LocalExplanation) -> HumanExplanation:
     """
-    Run all pattern matchers, pick the highest-scoring pattern (if any beats
-    PATTERN_THRESHOLD), and assemble the analyst-facing summary.
+    Run the appropriate pattern matchers (flow-schema or Kitsune-schema
+    depending on what's in expl.top_features), pick the highest-scoring
+    pattern (if any beats PATTERN_THRESHOLD), and assemble the analyst-
+    facing summary.
 
     For benign predictions we still produce a (low-severity) explanation so
     the analyst can audit the model's reasoning. The recommendations list
@@ -392,14 +573,22 @@ def build_human_explanation(expl: LocalExplanation) -> HumanExplanation:
             recommendations = [],
         )
 
-    # Score all matchers
-    scores = {
-        "PORT_SCAN":   _detect_port_scan(expl),
-        "DDOS":        _detect_ddos(expl),
-        "C2_BEACON":   _detect_c2_beacon(expl),
-        "DNS_TUNNEL":  _detect_dns_tunnel(expl),
-        "BRUTE_FORCE": _detect_brute_force(expl),
-    }
+    # Auto-dispatch: IoT detections produce Kitsune-named top features,
+    # Non-IoT detections produce flow-schema names. Different matchers.
+    if _is_kitsune_explanation(expl):
+        scores = {
+            "MIRAI_FLOOD": _detect_mirai_flood(expl),
+            "IOT_SCAN":    _detect_iot_scan(expl),
+            "SLOW_BEACON": _detect_slow_beacon(expl),
+        }
+    else:
+        scores = {
+            "PORT_SCAN":   _detect_port_scan(expl),
+            "DDOS":        _detect_ddos(expl),
+            "C2_BEACON":   _detect_c2_beacon(expl),
+            "DNS_TUNNEL":  _detect_dns_tunnel(expl),
+            "BRUTE_FORCE": _detect_brute_force(expl),
+        }
     best_pattern, best_score = max(scores.items(), key=lambda kv: kv[1])
 
     if best_score >= PATTERN_THRESHOLD:

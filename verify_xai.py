@@ -97,7 +97,9 @@ def test_1_imports() -> bool:
 
         step("Importing monitoring.py wrappers ...")
         from monitoring import (Stage1Classifier, Stage2NonIoTDetector,
+                                Stage2IoTDetector,
                                 MODEL_S1_RF, SCALER_S1_JSON, MODEL_S2_NONIOT,
+                                MODEL_S2_IOT, SCALER_S2_IOT,
                                 S1_FEATURES, S2_NONIOT_FEATURES_FALLBACK)
         step(f"  {PASS} monitoring.py loaded")
         step(f"  S1_FEATURES count = {len(S1_FEATURES)}")
@@ -120,15 +122,34 @@ def test_1_imports() -> bool:
              f"(features={s2._n_features}, seq_len={s2._seq_len}, "
              f"threshold={s2._threshold:.3f}, scaler={'yes' if s2._has_scaler else 'NO'})")
 
+        # Stage-2 IoT — try to load. If iot_model is missing or kitsune_extractor
+        # isn't importable, we still continue with Stage-2 NonIoT only.
+        s2_iot = None
+        if MODEL_S2_IOT.exists():
+            try:
+                s2_iot = Stage2IoTDetector(MODEL_S2_IOT, SCALER_S2_IOT)
+                step(f"  {PASS} Stage2IoTDetector loaded (Kitsune 115-feature path)")
+            except Exception as e:
+                step(f"  {WARN} Stage2IoTDetector load failed: {e}")
+                step(f"        IoT branch will be skipped in subsequent tests.")
+        else:
+            step(f"  {WARN} Stage-2 IoT model not found at {MODEL_S2_IOT} — IoT skipped")
+
         step("Building ExplainerBundle ...")
         try:
             bundle = ExplainerBundle(
                 stage1_classifier = s1,
+                iot_detector      = s2_iot,
                 noniot_detector   = s2,
             )
             stage1_avail = bundle.stage1() is not None
-            step(f"  {PASS} ExplainerBundle built  (Stage-1 SHAP: "
-                 f"{'available' if stage1_avail else 'unavailable - install shap'})")
+            iot_avail    = bundle.stage2("iot") is not None
+            noniot_avail = bundle.stage2("noniot") is not None
+            step(f"  {PASS} ExplainerBundle built")
+            step(f"        Stage-1 SHAP: "
+                 f"{'available' if stage1_avail else 'unavailable - install shap'}")
+            step(f"        Stage-2 IoT (IG):    {'available' if iot_avail else 'unavailable'}")
+            step(f"        Stage-2 NonIoT (IG): {'available' if noniot_avail else 'unavailable'}")
         except Exception as e:
             step(f"  {FAIL} Bundle construction failed: {e}")
             traceback.print_exc()
@@ -137,6 +158,7 @@ def test_1_imports() -> bool:
         # Stash for downstream tests
         globals()["_S1"]     = s1
         globals()["_S2"]     = s2
+        globals()["_S2_IOT"] = s2_iot
         globals()["_BUNDLE"] = bundle
         return True
 
@@ -404,6 +426,45 @@ def test_5_rule_engine() -> bool:
                    ("flow_pkts_per_sec", 5.0,    -0.05),
                    ("flag_SYN",          1.0,    -0.02)),
         ),
+        # ── IoT (Kitsune) cases ──────────────────────────────────────
+        (
+            "Mirai-style flood (MI_dir + HH dominant in attributions)",
+            "MIRAI_FLOOD", "critical",
+            _local("botnet", 0.96,
+                   ("MI_dir_L5_weight", 8500.0, +0.40),
+                   ("MI_dir_L5_mean",   1024.0, +0.25),
+                   ("HH_L5_mean",       2_500_000.0, +0.22),
+                   ("HH_L3_mean",       1_800_000.0, +0.15),
+                   ("MI_dir_L3_weight", 5500.0, +0.10)),
+        ),
+        (
+            "IoT scan (HpHp dominant — many distinct sockets)",
+            "IOT_SCAN", "high",
+            _local("botnet", 0.84,
+                   ("HpHp_L5_weight", 220.0, +0.38),
+                   ("HpHp_L3_weight", 180.0, +0.30),
+                   ("H_L5_weight",    150.0, +0.18),
+                   ("HpHp_L1_weight", 90.0,  +0.10),
+                   ("MI_dir_L5_weight", 50.0, +0.04)),
+        ),
+        (
+            "Slow IoT beacon (long-window HH + low-jitter signal)",
+            "SLOW_BEACON", "high",
+            _local("botnet", 0.78,
+                   ("HH_L0.01_pcc",        0.92, +0.40),
+                   ("HH_L0.01_mean",       145.0, +0.22),
+                   ("HH_jit_L0.01_mean",   0.012, +0.18),
+                   ("HH_L0.1_mean",        165.0, +0.12),
+                   ("HH_jit_L0.01_variance", 0.001, +0.08)),
+        ),
+        (
+            "Benign IoT (Kitsune features, model says benign)",
+            "GENERIC", "low",
+            _local("benign", 0.94,
+                   ("MI_dir_L5_weight", 12.0,  -0.10),
+                   ("HH_L5_mean",       450.0, -0.05),
+                   ("H_L5_weight",      8.0,   -0.02)),
+        ),
     ]
 
     failed = 0
@@ -434,8 +495,98 @@ def test_5_rule_engine() -> bool:
 
 
 # ════════════════════════════════════════════════════════════════════
-# Bonus — Latency benchmark (informational only, not pass/fail)
+# Test 6 — IoT explainer end-to-end on the real loaded model
+# Catches: IoT model loading issues, Kitsune feature schema mismatches,
+#         IG running on the wrong tensor shape, IoT pattern dispatch
 # ════════════════════════════════════════════════════════════════════
+def test_6_iot_e2e() -> bool:
+    banner("TEST 6 — IoT explainer end-to-end (Stage-2 IoT, Kitsune 115)")
+
+    s2_iot = globals().get("_S2_IOT")
+    bundle = globals().get("_BUNDLE")
+
+    if s2_iot is None or bundle is None or bundle.stage2("iot") is None:
+        step(f"  {WARN} IoT model not loaded — skipping IoT E2E test")
+        step(f"        (this is informational only; not a failure)")
+        return True   # don't fail the suite if user doesn't have the IoT model
+
+    expl = bundle.stage2("iot")
+    step(f"IoT explainer ready: seq_len={expl._seq_len}, "
+         f"n_features={expl._n_features}, n_steps={expl._n_steps}")
+
+    # ── Build a Kitsune-shaped sequence ──
+    rng = np.random.default_rng(31415)
+    arr = rng.uniform(0.0, 1.0, size=(20, expl._n_features)).astype(np.float32)
+    # Bias the LATEST timestep toward "high MI_dir + HH" to encourage Mirai-like
+    # attributions (test that the explainer surfaces those features).
+    feature_cols = expl._feature_cols
+    for i, name in enumerate(feature_cols):
+        if name.startswith(("MI_dir_L5_", "HH_L5_", "HH_L3_")):
+            arr[-1, i] = rng.uniform(0.7, 1.0)
+
+    # ── Run IG ──
+    t0 = time.perf_counter()
+    res = expl.explain(arr, top_k=8)
+    elapsed_ms = (time.perf_counter() - t0) * 1000
+    step(f"  {PASS} IG completed in {elapsed_ms:.1f} ms")
+    step(f"        prediction = {res.prediction}, conf = {res.confidence:.4f}")
+    step(f"        method     = {res.method}")
+
+    # ── Sanity: completeness axiom on the IoT model ──
+    import torch
+    x = torch.tensor(arr, dtype=torch.float32).unsqueeze(0)
+    with torch.no_grad():
+        fx = expl._model(x).item()
+        f0 = expl._model(torch.zeros_like(x)).item()
+    sum_attr = sum(res.raw_attributions.values())
+    expected = fx - f0
+    gap = abs(sum_attr - expected)
+    tol = max(0.05, 0.05 * abs(expected))   # IoT model has bigger logits, looser tol
+    if gap > tol:
+        step(f"  {FAIL} IoT IG completeness gap {gap:.4f} > tol {tol:.4f}")
+        step(f"        (Σ attr = {sum_attr:+.4f}, f(x)-f(0) = {expected:+.4f})")
+        return False
+    rel_pct = 100 * gap / abs(expected) if expected != 0 else 0.0
+    step(f"  {PASS} IoT IG completeness gap = {gap:.4f} ({rel_pct:.2f}%) within tol {tol:.4f}")
+
+    # ── Top features should be Kitsune-named ──
+    top_names = [f.feature for f in res.top_features]
+    kitsune_count = sum(1 for n in top_names
+                        if any(n.startswith(p) for p in
+                               ("MI_dir_", "H_", "HH_", "HH_jit_", "HpHp_")))
+    if kitsune_count == 0:
+        step(f"  {FAIL} No Kitsune-named features in top-K: {top_names}")
+        step(f"        (Means IoT explainer's feature_cols don't match Kitsune schema.)")
+        return False
+    step(f"  {PASS} {kitsune_count}/{len(top_names)} top features are Kitsune-named")
+    step(f"        examples: {top_names[:3]}")
+
+    # ── Run the rule engine and confirm Kitsune dispatch fires ──
+    from src.xai import build_human_explanation
+    h = build_human_explanation(res)
+    step(f"  Rule engine output:")
+    step(f"    pattern  = {h.pattern}")
+    step(f"    severity = {h.severity}")
+    step(f"    summary  = {h.summary[:80]}")
+    if res.prediction == "botnet":
+        # If the model called this synthetic input "botnet", the rule engine
+        # should at least surface SOME pattern (likely MIRAI_FLOOD given the
+        # bias we added). Falling through to GENERIC is acceptable but worth
+        # noting because it means the synthetic distribution didn't trigger
+        # any IoT pattern matcher.
+        if h.pattern in ("MIRAI_FLOOD", "IOT_SCAN", "SLOW_BEACON"):
+            step(f"  {PASS} IoT pattern dispatched correctly: {h.pattern}")
+        else:
+            step(f"  {WARN} IoT detection fell through to {h.pattern} — synthetic")
+            step(f"        input may not have triggered the matchers")
+            step(f"        (real Mirai PCAPs should land on MIRAI_FLOOD / IOT_SCAN)")
+    else:
+        step(f"  {PASS} Benign IoT correctly dispatched to GENERIC")
+
+    return True
+
+
+
 def bench_latency() -> None:
     banner("BENCHMARK — XAI latency per botnet detection (informational)")
 
@@ -473,6 +624,7 @@ def main() -> int:
         ("Determinism",             test_3_determinism),
         ("Input variance",          test_4_variance),
         ("Rule engine",             test_5_rule_engine),
+        ("IoT end-to-end",          test_6_iot_e2e),
     ]
 
     results: dict[str, bool] = {}

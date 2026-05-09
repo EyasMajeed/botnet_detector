@@ -301,6 +301,10 @@ class DetectionResult:
     #   "oui_always"    → high-confidence OUI override (Tier 1, conf >= 0.90)
     #   "oui_low_ml"    → medium-confidence OUI broke an uncertain ML tie (Tier 2)
     s1_method: str = "ml"
+    # XAI explanation — populated by BotnetMonitor.process_packet when
+    # label == "botnet". None for benign / unknown labels (we save compute
+    # by not explaining benign flows). Shape matches src.xai.explain_flow().
+    xai: Optional[dict] = None
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1317,6 +1321,28 @@ class BotnetMonitor:
                        "iot": 0, "noniot": 0,
                        "botnet": 0, "benign": 0,
                        "alerts": 0, "suspicious_flows": 0}
+
+        # ── XAI integration ──────────────────────────────────────────────
+        # Build the ExplainerBundle once, here, so process_packet can call
+        # explain_flow() synchronously on every botnet detection without
+        # paying the bundle-construction cost per call.
+        # Failure to import or build is logged as a warning, NOT raised —
+        # detection must keep working even if XAI is unavailable.
+        self._xai_bundle = None
+        try:
+            from src.xai import ExplainerBundle
+            self._xai_bundle = ExplainerBundle(
+                stage1_classifier = self.s1,
+                iot_detector      = self.s2_iot,
+                noniot_detector   = self.s2_noniot,
+            )
+            log.info("[XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)")
+        except ImportError as e:
+            log.warning("[XAI] src.xai module not importable - "
+                        "explanations disabled: %s", e)
+        except Exception as e:
+            log.warning("[XAI] Bundle init failed - explanations disabled: %s", e)
+
         log.info("  BotnetMonitor ready.")
 
     def process_packet(self, timestamp: float,
@@ -1412,8 +1438,35 @@ class BotnetMonitor:
             label, s2_conf = self.s2_noniot.stage2_predict(seq)
 
         lat_ms  = (time.perf_counter() - t0) * 1000
+        # Note: lat_ms measures DETECTION latency only (Stage-1 + Stage-2).
+        # XAI cost is excluded by design — it's a post-detection enrichment,
+        # not on the critical path for alerting.
         alerted = self._maybe_alert(src_ip, label, s2_conf, rec.last_seen, device_type)
         self._stats["botnet" if label == "botnet" else "benign"] += 1
+
+        # ── XAI: explain only botnet detections (saves ~95-150 ms on benign) ─
+        # Synchronous in the Scapy thread per design choice — adds ~150 ms
+        # latency per botnet detection for IoT (seq=20×115) and ~95 ms for
+        # NonIoT (seq=20×46). At typical 1-5% botnet rates this amortises to
+        # ~5-7 ms/flow average, well within budget. If a high-rate flood
+        # makes this an issue, consider an async worker (separate task).
+        xai_dict = None
+        if label == "botnet" and self._xai_bundle is not None:
+            try:
+                from src.xai import explain_flow
+                xai_dict = explain_flow(
+                    seq,
+                    stage1_label = device_type,
+                    stage2_label = "botnet",
+                    bundle       = self._xai_bundle,
+                    top_k        = 8,
+                )
+            except Exception as e:
+                # explain_flow has its own try/except inside so this is
+                # belt-and-braces. We swallow + log to keep capture alive.
+                log.warning("[XAI] explain_flow raised on %s flow %s: %r",
+                            device_type, src_ip, e)
+                xai_dict = None
 
         result = DetectionResult(
             flow_id=str(rec.key), src_ip=src_ip, dst_ip=rec.key.ip_hi,
@@ -1422,6 +1475,7 @@ class BotnetMonitor:
             suspicion_score=round(susp, 2), latency_ms=round(lat_ms, 2),
             alerted=alerted, timestamp=rec.last_seen,
             s1_method=s1_method,
+            xai=xai_dict,
         )
         self._results.append(result)
         log.debug("  [Flow] %-22s dev=%-6s label=%-7s s1=%.2f s2=%.2f lat=%.1fms",

@@ -839,24 +839,79 @@ class ReportsPage(QWidget):
                                            f"{fmt} Files (*.{fmt.lower()})")
         if not p:
             return
+
         if fmt == "CSV":
             with open(p, "w", newline="") as fp:
                 w = csv.writer(fp)
+                # CSV header — extended with XAI columns. We flatten the XAI
+                # dict into 4 string columns so spreadsheet tools can read
+                # them. Top features are pipe-separated for parsability.
                 w.writerow(["#","Report","Source","Src IP","Dst IP","Protocol",
                             "Label","Confidence","Device","S1 Conf","Latency ms",
-                            "Suspicion","Alerted","Timestamp"])
+                            "Suspicion","Alerted","Timestamp",
+                            "XAI Pattern","XAI Severity","XAI Summary",
+                            "XAI Top Features","XAI Recommendation"])
                 for i, f in enumerate(self.store.flows, 1):
+                    # Pull XAI fields safely — older flows / benign flows
+                    # have xai=None.
+                    xai = getattr(f, "xai", None) or {}
+                    pattern   = xai.get("pattern",  "")
+                    severity  = xai.get("severity", "")
+                    summary   = xai.get("summary",  "")
+                    # Top features → "feature1=value1 (+attr1) | feature2=value2 (+attr2) | ..."
+                    top_str = " | ".join(
+                        f"{tf.get('display', tf.get('feature','?'))}="
+                        f"{tf.get('value', 0):.3f} ({tf.get('attribution', 0):+.3f})"
+                        for tf in xai.get("top_features", [])[:5]
+                    )
+                    rec_str = (xai.get("recommendations") or [""])[0]
                     w.writerow([i, f.report_id, f.source, f.src_ip, f.dst_ip,
                                 f.protocol, f.label, f"{f.confidence:.4f}",
                                 f.device_type, f"{f.s1_confidence:.4f}",
                                 f"{f.latency_ms:.2f}", f"{f.suspicion:.2f}",
                                 f.alerted,
-                                datetime.fromtimestamp(f.timestamp).strftime("%Y-%m-%d %H:%M:%S")])
+                                datetime.fromtimestamp(f.timestamp).strftime("%Y-%m-%d %H:%M:%S"),
+                                pattern, severity, summary, top_str, rec_str])
             QMessageBox.information(self, "Exported", f"CSV saved:\n{p}")
-        else:
-            QMessageBox.information(
-                self, "PDF",
-                "PDF export not yet wired — run Export CSV for now.")
+            return
+
+        # PDF path — uses report_generator module. Imported lazily so the GUI
+        # can launch even without reportlab installed; the user only sees the
+        # error if they try to export PDF.
+        try:
+            from report_generator import generate_pdf_report
+        except ImportError as e:
+            QMessageBox.critical(
+                self, "PDF export unavailable",
+                "PDF export requires the reportlab package.\n\n"
+                "Install with:\n"
+                "    pip install reportlab\n\n"
+                f"({e})"
+            )
+            return
+
+        try:
+            # Build report metadata from the latest report (or aggregate if
+            # multiple). For "all flows" exports we report the total flow
+            # count and "mixed" source rather than tying to one report.
+            reports = list(self.store.reports)
+            if reports:
+                latest = reports[-1]
+                meta = {
+                    "report_id":    latest.report_id,
+                    "source":       latest.source,
+                    "filename":     latest.filename,
+                    "duration_sec": latest.duration_sec,
+                }
+            else:
+                meta = {"report_id": "—", "source": "mixed"}
+            generate_pdf_report(self.store.flows, out_path=p, report_meta=meta)
+            QMessageBox.information(self, "Exported", f"PDF saved:\n{p}")
+        except Exception as e:
+            QMessageBox.critical(
+                self, "PDF export failed",
+                f"An error occurred while generating the PDF:\n\n{type(e).__name__}: {e}"
+            )
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 6 — SETTINGS

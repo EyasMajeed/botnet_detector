@@ -267,6 +267,9 @@ class BotnetMonitorThread(QThread):
             "_s1_confidence": float(r.s1_confidence),
             "_latency_ms":    float(r.latency_ms),
             "_suspicion":     float(r.suspicion_score),
+            # XAI explanation (None for benign flows; dict for botnet flows
+            # when src.xai is available — see BotnetMonitor.process_packet).
+            "_xai":           r.xai,
         })
 
     def _emit_stats(self, now: float) -> None:
