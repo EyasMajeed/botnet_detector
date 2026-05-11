@@ -1,0 +1,14 @@
+test_id,name,phase,severity,verdict,duration_sec,peak_cpu_pct,avg_cpu_pct,peak_rss_mb,avg_rss_mb,peak_gpu_mb,timed_out,return_code
+M-00,Schema drift,A,CRITICAL,PASS,0.274,0.0,0.0,8.7,8.7,,False,0
+F-01,Truncated PCAPNG,A,MEDIUM,PASS,0.254,0.0,0.0,4.9,4.9,,False,0
+F-02,Claimed-huge PCAP header,A,HIGH,PASS,0.255,0.0,0.0,5.6,5.6,,False,0
+F-03,Oversized CSV,A,MEDIUM,PASS,7.272,103.8,95.5,78.7,34.3,,False,0
+F-04,Header-only CSV,A,MEDIUM,PASS,0.252,0.0,0.0,0.6,0.6,,False,0
+F-05,PCAP renamed .csv,A,LOW,PASS,0.253,0.0,0.0,4.4,4.4,,False,0
+F-07,UTF-16 CSV,A,HIGH,PASS,0.254,0.0,0.0,5.1,5.1,,False,0
+F-08,Parser fuzzing,A,MEDIUM,PASS,0.503,91.9,46.0,0.8,0.4,,False,0
+F-09,Zip bomb disguised as pcap,A,MEDIUM,PASS,0.253,0.0,0.0,2.8,2.8,,False,0
+P-02,Malformed Ethernet,A,HIGH,SKIPPED,0.0,,,,,,False,0
+P-03,VLAN-tagged frames,A,HIGH,SKIPPED,0.0,,,,,,False,0
+P-04,IPv6-only flows,A,HIGH,SKIPPED,0.0,,,,,,False,0
+P-07,Backwards timestamps,A,HIGH,SKIPPED,0.0,,,,,,False,0

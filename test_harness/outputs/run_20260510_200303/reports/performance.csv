@@ -1,0 +1,35 @@
+test_id,name,phase,severity,verdict,duration_sec,peak_cpu_pct,avg_cpu_pct,peak_rss_mb,avg_rss_mb,peak_gpu_mb,timed_out,return_code
+M-00,Schema drift,A,CRITICAL,PASS,1.282,100.9,100.0,337.0,214.0,,False,0
+F-01,Truncated PCAPNG,A,MEDIUM,PASS,1.018,116.1,102.8,260.8,167.3,,False,0
+F-02,Claimed-huge PCAP header,A,HIGH,PASS,1.022,99.9,85.2,260.3,165.3,,False,0
+F-03,Oversized CSV,A,MEDIUM,PASS,2.802,175.9,106.7,259.5,225.2,,False,0
+F-04,Header-only CSV,A,MEDIUM,PASS,1.02,99.8,96.5,260.4,168.1,,False,0
+F-05,PCAP renamed .csv,A,LOW,PASS,1.029,99.9,96.4,260.4,165.0,,False,0
+F-07,UTF-16 CSV,A,HIGH,PASS,1.026,99.9,97.0,260.4,165.8,,False,0
+F-08,Parser fuzzing,A,MEDIUM,PASS,1.027,99.9,86.8,260.3,167.5,,False,0
+F-09,Zip bomb disguised as pcap,A,MEDIUM,PASS,1.028,100.0,95.5,260.3,167.9,,False,0
+P-02,Malformed Ethernet frames,A,HIGH,PASS,2.045,99.9,92.7,463.5,298.4,,False,0
+P-03,VLAN-tagged frames,A,HIGH,PASS,4.841,100.0,75.5,482.2,399.8,,False,0
+P-04,IPv6-only flows,A,HIGH,PASS,2.549,99.9,92.8,478.1,334.8,,False,0
+P-07,Backwards timestamps,A,HIGH,PASS,8.882,99.9,70.3,482.7,438.1,,False,0
+M-T1,Threshold sweep (synthetic),B,MEDIUM,FAIL,15.49,101.6,71.2,508.6,465.9,,False,0
+M-EF,Empty-flow regression,B,HIGH,FAIL,6.866,100.7,82.7,501.8,434.1,,False,0
+M-WS,Window starvation,B,HIGH,FAIL,27.473,99.7,83.1,510.4,490.6,,False,0
+M-CAL,Confidence calibration,B,MEDIUM,FAIL,38.414,99.9,87.0,509.0,495.5,,False,0
+P-05,GRE tunnel handling,C,MEDIUM,PASS,3.554,99.9,84.2,478.7,373.1,,False,0
+S1-06,MAC-OUI spoofing override,C,CRITICAL,SKIPPED,2.3,114.3,100.8,468.2,307.6,,False,0
+SE-A,SYN flood,C,HIGH,PASS,69.002,112.8,63.6,507.6,498.2,,False,0
+SC-K,Kitsune key explosion,C,HIGH,PASS,145.111,102.0,61.9,671.1,658.6,,False,0
+RT-1,Slow beaconing botnet (multi-session),C,HIGH,FAIL,2.371,100.0,90.9,476.7,320.9,,False,0
+RT-1b,Slow-C2 evasion (period > idle),C,HIGH,FAIL,2.328,100.3,91.9,477.5,324.3,,False,0
+M-ADV,Scaler-aware adversarial perturbation,C,HIGH,FAIL,409.383,100.3,55.9,448.6,447.4,,False,0
+X-A1,XAI sanity battery,C,HIGH,PASS,11.862,108.2,100.0,452.8,425.5,,False,0
+G-DS,DetectionStore behaviour,D,MEDIUM,PASS,4.654,99.9,97.8,325.1,290.0,,False,0
+G-AF,Alert flood,D,MEDIUM,PASS,8.005,133.9,92.0,340.1,316.1,,False,0
+G-IT,PcapInferenceThread,D,HIGH,PASS,2.323,99.9,93.0,490.4,326.5,,False,0
+G-RU,Repeated upload cycles,D,MEDIUM,PASS,25.41,99.9,59.6,457.4,444.3,,False,0
+ST-1,Large PCAP throughput,D,MEDIUM,PASS,110.747,102.9,96.6,2187.4,1508.1,,False,0
+ST-2a,Ingestion throughput (process_packet only),D,MEDIUM,PASS,2.588,99.3,84.5,481.0,297.2,,False,0
+ST-2b,End-to-end throughput,D,MEDIUM,FAIL,155.811,99.9,56.7,552.3,545.9,,False,0
+ST-3,Long-duration monitoring,D,MEDIUM,PASS,32.31,100.0,66.1,574.4,522.0,,False,0
+ST-4,Concurrent uploads,D,MEDIUM,PASS,8.223,139.6,128.0,563.5,501.9,,False,0

@@ -1,0 +1,11 @@
+# Test-harness dependencies. The project's own requirements are separate.
+#
+# Required for any meaningful run:
+scapy>=2.5.0
+psutil>=5.9.0
+
+# Optional — enable extra checks. Most tests degrade gracefully without these.
+numpy>=1.24
+torch>=2.0          # for ML tests / XAI sanity (skipped automatically if absent)
+PyQt6>=6.5          # for GUI tests
+pynvml>=11.5        # only if you want GPU memory sampling on NVIDIA cards
