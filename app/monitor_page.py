@@ -8,8 +8,9 @@ What changed vs the mock:
     - No scoring          →  SuspicionScorer   (Section 7.3.4 thresholds)
     - No ML               →  inference_bridge  (stub today, real tomorrow)
     - Rows are colour-coded by SUSPICION SCORE, not just label
-    - Suspicious flows (score ≥ 2) show a 🔴 badge; mild (score 1) show 🟡
-    - Status bar shows sniff-trigger count and inference latency
+    - High-suspicion flows (score >= 3.0) tagged HIGH in red;
+      mild (>= 1.5) tagged MED in amber; benign tagged LOW.
+    - Status bar shows alert count and inference latency
 
 How to use in mockApp.py:
     # Replace the MonitorPage class import / definition with:
@@ -28,7 +29,7 @@ from __future__ import annotations
 from datetime import datetime
 from pathlib import Path
 
-from PyQt6.QtCore    import Qt, QTimer, pyqtSlot
+from PyQt6.QtCore    import Qt, QTimer, pyqtSlot, pyqtSignal
 from PyQt6.QtGui     import QColor, QFont
 from PyQt6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QFrame,
@@ -105,7 +106,24 @@ class MonitorPage(QWidget):
         __init__   — build UI, create thread + scorer (not started yet)
         showEvent  — auto-start capture when page becomes visible
         hideEvent  — auto-stop capture when page is hidden
+
+    Signals:
+        session_ended(dict) — fired when stop_capture() ends an active capture
+                              session. Payload contains the session summary:
+                                {
+                                  "duration_sec":  float,  # wall-clock seconds
+                                  "total_flows":   int,    # all flows processed
+                                  "alerts":        int,    # cooldown-aware alerts
+                                  "sniff_triggers": int,   # raw botnet detections
+                                  "started_at":    datetime,
+                                  "ended_at":      datetime,
+                                }
+                              mockApp.py connects this to its live-session-report
+                              handler so a report is generated automatically when
+                              the user stops live monitoring.
     """
+
+    session_ended = pyqtSignal(dict)
 
     def __init__(self, store=None, settings=None, parent=None):
         super().__init__(parent)
@@ -175,7 +193,7 @@ class MonitorPage(QWidget):
         ch.addWidget(self._clr_btn)
         ch.addSpacing(8)
 
-        self._tog_btn = _btn("▶  Start", "primary")
+        self._tog_btn = _btn("Start", "primary")
         self._tog_btn.clicked.connect(self._toggle)
         ch.addWidget(self._tog_btn)
         root.addLayout(ch)
@@ -188,7 +206,6 @@ class MonitorPage(QWidget):
             ("Flows/sec",    "0",          ACC),
             ("Bandwidth",    "0 KB/s",     OK),
             ("Alerts",       "0",          ERR),
-            ("Sniff Triggers","0",         WARN),
             ("Uptime",       "00:00:00",   TG),
         ]:
             f = QFrame()
@@ -223,7 +240,7 @@ class MonitorPage(QWidget):
 
         # Filter
         self._filter_cb = QComboBox()
-        self._filter_cb.addItems(["All", "Botnet", "Benign", "Suspicious (score≥2)"])
+        self._filter_cb.addItems(["All", "Botnet", "Benign"])
         self._filter_cb.setFixedHeight(28)
         self._filter_cb.setStyleSheet(
             f"QComboBox{{background:{CARD};color:{TG};border:1px solid {BDR};"
@@ -240,7 +257,7 @@ class MonitorPage(QWidget):
 
         # Table
         cols = ["Time", "Src IP", "Dst IP", "Protocol",
-                "Label", "Confidence", "Device", "Score", "Sniff?"]
+                "Label", "Confidence", "Device"]
         self._table = QTableWidget(0, len(cols))
         self._table.setHorizontalHeaderLabels(cols)
         self._table.verticalHeader().setVisible(False)
@@ -261,8 +278,6 @@ class MonitorPage(QWidget):
             (4, QHeaderView.ResizeMode.Fixed,    80),   # Label     Botnet / Benign
             (5, QHeaderView.ResizeMode.Fixed,    90),   # Confidence 12.34%
             (6, QHeaderView.ResizeMode.Fixed,    80),   # Device    NONIOT / IOT
-            (7, QHeaderView.ResizeMode.Fixed,    70),   # Score     🔴 0
-            (8, QHeaderView.ResizeMode.Fixed,    80),   # Sniff?    🔴 Yes / —
         ]:
             h.setSectionResizeMode(col, mode)
             if w:
@@ -291,7 +306,7 @@ class MonitorPage(QWidget):
         # reliable path. First click blocks for ~3-5s while 3 models load.
         if hasattr(self._thread, "ensure_monitor"):
             self._tog_btn.setEnabled(False)
-            self._status_lbl.setText("● Loading detection models…")
+            self._status_lbl.setText("Loading detection models...")
             self._status_lbl.setStyleSheet(f"color:{TG};background:transparent;")
             from PyQt6.QtWidgets import QApplication
             QApplication.processEvents()                # paint the status text
@@ -307,19 +322,37 @@ class MonitorPage(QWidget):
         self._scorer.reset_baseline()
         self._thread.start()
         self._uptime_timer.start(1000)
-        self._tog_btn.setText("⏸  Pause")
-        self._status_lbl.setText("● Capturing…")
+        self._tog_btn.setText("Pause")
+        self._status_lbl.setText("Capturing")
         self._status_lbl.setStyleSheet(f"color:{OK};background:transparent;")
 
     def stop_capture(self):
         if not self._running:
             return
+        # Snapshot session stats BEFORE clearing state — _t0 etc. stay intact
+        # until start_capture() resets them on the next run.
+        ended_at  = datetime.now()
+        summary   = {
+            "duration_sec":   (ended_at - self._t0).total_seconds(),
+            "total_flows":    self._total_flows,
+            "alerts":         self._alert_count,
+            "sniff_triggers": self._sniff_count,
+            "started_at":     self._t0,
+            "ended_at":       ended_at,
+        }
         self._running = False
         self._thread.stop()
         self._uptime_timer.stop()
-        self._tog_btn.setText("▶  Resume")
+        self._tog_btn.setText("Resume")
         self._status_lbl.setText("Paused.")
         self._status_lbl.setStyleSheet(f"color:{TG};background:transparent;")
+        # Notify listeners (e.g. mockApp's _on_live_session_ended which can
+        # auto-generate a report). Wrapped so a slot bug doesn't break the
+        # stop flow itself.
+        try:
+            self.session_ended.emit(summary)
+        except Exception:
+            pass
 
     # ── Qt lifecycle ──────────────────────────────────────────────────────────
     ''' uncomment the following if u want the live monitoring stops when u switch to another page,
@@ -341,7 +374,34 @@ class MonitorPage(QWidget):
 
     @pyqtSlot(dict)
     def _on_flow(self, flow: dict):
-        """Receive one flow from LiveCaptureThread, score + infer, add to table."""
+        """
+        Receive one flow from the capture thread, decorate it with display
+        metadata, push it to the store, and append a row to the table.
+
+        Value-source policy (so every column in the UI is traceable):
+
+          - When the flow comes from BotnetMonitorThread (the real Stage-1
+            + Stage-2 pipeline), EVERY value shown is taken straight from
+            the DetectionResult the monitor produced:
+                _label          → Label column
+                _botnet_prob    → Confidence column        (s2_confidence)
+                _device_type    → Device column            (Stage-1 routing)
+                _suspicion      → Score column             (real suspicion_scoring)
+                _alert          → Sniff? column + alert counter
+                _latency_ms     → status bar latency
+            The local SuspicionScorer is NOT consulted on this path. Its
+            input dict from the bridge has zeros for flow features (the
+            real features live inside BotnetMonitor's per-flow state), so
+            running it here would produce garbage scores derived from
+            zeros and override the genuine ones.
+
+          - When the flow comes from the legacy LiveCaptureThread (DEMO
+            mode, or DETECTOR mode without per-flow features), the bridge
+            cannot provide a real suspicion score, so we fall back to the
+            local SuspicionScorer. This path is feature-poor by design
+            (heartbeats / alert-only events) — the score is best-effort
+            and clearly labelled in code as a fallback.
+        """
         if not self._running:
             return
 
@@ -349,30 +409,50 @@ class MonitorPage(QWidget):
         # if flow.get("_heartbeat"):
         #     return
 
-        # 1. Suspicion scoring (fast, no ML)
-        score_result = self._scorer.score(flow)
-        score        = score_result["score"]
-        trigger_sniff= score_result["trigger_sniff"]
-
-        # 2. ML inference / detector mode
+        # 1. ML inference / detector mode
         if "_label" in flow:
+            # Bridge-decorated flow: use ITS values, do not re-score locally.
             label      = flow.get("_label", "benign")
             confidence = float(flow.get("_botnet_prob", 0.0))
-            # Trust _device_type from the bridge; fall back to alert-flag heuristic
-            # only for legacy LiveCaptureThread DETECTOR-mode flows that lack it.
-            device     = flow.get(
-                "_device_type",
-                "iot" if flow.get("_alert") else "noniot",
-            )
+            # Legacy LiveCaptureThread DETECTOR mode doesn't emit _device_type.
+            # Don't guess from _alert (that conflates label with routing) — fall
+            # back to "unknown" so the UI doesn't display invented routing data.
+            device     = flow.get("_device_type", "unknown")
             self._last_latency = float(flow.get("_latency_ms", 0.0))
+            # Real suspicion (float, scale 0.0..~9.5, threshold 3.0) from the
+            # monitor's suspicion_scoring(). Keep precision — don't truncate.
+            # Fall back to the GUI scorer (integer scale 0..N+) only for the
+            # legacy LiveCaptureThread path that lacks _suspicion.
+            if "_suspicion" in flow:
+                score        = float(flow["_suspicion"])
+                # Bucket for visual coloring: align to the monitor's SUSP_THRESHOLD
+                # of 3.0 (see monitoring.py). >=3 = high (red), >=1.5 = mild (amber).
+                score_bucket = 2 if score >= 3.0 else 1 if score >= 1.5 else 0
+            else:
+                _sr          = self._scorer.score(flow)
+                score        = float(_sr["score"])
+                # GUI scorer uses integer scale where trigger threshold is 2.
+                score_bucket = 2 if score >= 2 else 1 if score >= 1 else 0
+            # "Sniff?" column = the monitor's alert decision (the only authentic
+            # cooldown-aware alert signal). For legacy DETECTOR mode without
+            # _alert, fall back to the local scorer's trigger.
+            if "_alert" in flow:
+                trigger_sniff = bool(flow["_alert"])
+            else:
+                trigger_sniff = self._scorer.score(flow)["trigger_sniff"]
         else:
+            # Demo mode / pure feature dicts: GUI must do its own inference + scoring.
             infer = run_inference(flow)
             self._last_latency = infer["latency_ms"]
             label      = infer["label"]
             confidence = infer["confidence"]
             device     = infer["device_type"]
+            score_result  = self._scorer.score(flow)
+            score         = float(score_result["score"])
+            trigger_sniff = score_result["trigger_sniff"]
+            score_bucket  = 2 if score >= 2 else 1 if score >= 1 else 0
 
-        # 2b. Apply user's confidence threshold from Settings (functional).
+        # 1b. Apply user's confidence threshold from Settings (functional).
         # The pre-trained models have internal thresholds (IoT 0.52, NonIoT
         # 0.7656); this lets the user move the operating point on the ROC
         # curve without retraining. 'unknown' labels are preserved.
@@ -380,14 +460,21 @@ class MonitorPage(QWidget):
             from detection_store import apply_threshold
             label = apply_threshold(label, confidence, self.settings.confidence_threshold)
 
-        # 3. Update counters
+        # 2. Update counters — these track DIFFERENT real events:
+        #   Alerts          = monitor's cooldown-aware alert decision (r.alerted)
+        #                     i.e. "distinct attack events worth user attention"
+        #   Sniff Triggers  = total botnet-labelled flows
+        #                     i.e. raw detection volume (will be >= Alerts because
+        #                     cooldown groups repeated detections from the same src)
+        # Keeping them distinct gives the user useful signal: a big gap between
+        # them means many repeated detections from a small number of sources.
         self._total_flows += 1
         if label == "botnet":
-            self._alert_count += 1
-        if trigger_sniff:
             self._sniff_count += 1
+        if trigger_sniff:
+            self._alert_count += 1
 
-        # 3b. Push to the shared store so Dashboard / Results / Reports update.
+        # 2b. Push to the shared store so Dashboard / Results / Reports update.
         if self.store is not None:
             try:
                 self.store.add_live_flow(DetectionFlow(
@@ -402,7 +489,7 @@ class MonitorPage(QWidget):
                     s1_confidence = float(flow.get("_s1_confidence", 0.0)),
                     suspicion     = float(flow.get("_suspicion", score)),
                     latency_ms    = self._last_latency,
-                    alerted       = bool(flow.get("_alert", False)),
+                    alerted       = bool(flow.get("_alert", trigger_sniff)),
                     # XAI explanation from monitor_bridge (None for benign /
                     # when XAI is unavailable). Same shape as upload-path xai.
                     xai           = flow.get("_xai"),
@@ -411,20 +498,20 @@ class MonitorPage(QWidget):
                 # Never let a store hiccup kill live capture.
                 pass
 
-        # 4. Apply filter
+        # 3. Apply filter
         filt = self._filter_cb.currentText()
         if filt == "Botnet"             and label != "botnet":      return
         if filt == "Benign"             and label != "benign":      return
-        if filt == "Suspicious (score≥2)" and score < 2:            return
+        if filt == "High Suspicion" and score_bucket < 2:           return
 
-        # 5. Append row to table
-        self._add_row(flow, label, confidence, device, score, trigger_sniff)
+        # 4. Append row to table
+        self._add_row(flow, label, confidence, device, score, score_bucket, trigger_sniff)
 
-        # 6. Status bar
+        # 5. Status bar
         self._status_lbl.setText(
-            f"● Flows: {self._total_flows}  |  "
+            f"Flows: {self._total_flows}  |  "
             f"Last inference: {self._last_latency:.1f} ms  |  "
-            f"Sniff triggers: {self._sniff_count}"
+            f"Alerts: {self._alert_count}"
         )
         self._flow_count_lbl.setText(f"{self._table.rowCount()} rows")
 
@@ -436,11 +523,10 @@ class MonitorPage(QWidget):
             f"{bw} KB/s" if bw < 1024 else f"{bw/1024:.1f} MB/s"
         )
         self._stat_labels["Alerts"].setText(str(self._alert_count))
-        self._stat_labels["Sniff Triggers"].setText(str(self._sniff_count))
 
     @pyqtSlot(str)
     def _on_error(self, msg: str):
-        self._status_lbl.setText(f"⚠ {msg}")
+        self._status_lbl.setText(f"Error: {msg}")
         self._status_lbl.setStyleSheet(f"color:{ERR};background:transparent;")
 
     def _toggle(self):
@@ -457,23 +543,23 @@ class MonitorPage(QWidget):
         self._scorer.reset_baseline()
         self._flow_count_lbl.setText("0 rows")
         for lbl, val in [("Flows/sec","0"),("Bandwidth","0 KB/s"),
-                          ("Alerts","0"),("Sniff Triggers","0")]:
+                          ("Alerts","0")]:
             self._stat_labels[lbl].setText(val)
 
     def _populate_interfaces(self):
             """Fill the interface dropdown with real interfaces + a Demo option."""
             self._iface_cb.blockSignals(True)
             self._iface_cb.clear()
-            self._iface_cb.addItem("🔴  Demo Mode (simulated)", userData=None)
+            self._iface_cb.addItem("[Demo]  Demo Mode (simulated)", userData=None)
 
             ifaces = get_interfaces()
             for name, ip in ifaces:
-                self._iface_cb.addItem(f"📡  {name}  ({ip})", userData=name)
+                self._iface_cb.addItem(f"[Live]  {name}  ({ip})", userData=name)
 
             if not ifaces and not SCAPY_AVAILABLE:
-                self._iface_cb.addItem("⚠  Scapy not installed — Demo only", userData=None)
+                self._iface_cb.addItem("[!] Scapy not installed - Demo only", userData=None)
             elif not ifaces:
-                self._iface_cb.addItem("⚠  No interfaces found — run setup_live_capture.py", userData=None)
+                self._iface_cb.addItem("[!] No interfaces found - run setup_live_capture.py", userData=None)
             else:
                 # Default to first real interface (index 1, since index 0 is Demo)
                 self._iface_cb.setCurrentIndex(1)
@@ -523,20 +609,23 @@ class MonitorPage(QWidget):
     # ── Table helpers ─────────────────────────────────────────────────────────
 
     def _add_row(self, flow: dict, label: str, conf: float,
-                 device: str, score: int, sniff: bool):
+                 device: str, score: float, score_bucket: int, sniff: bool):
         is_botnet = (label == "botnet")
         ts = datetime.now().strftime("%H:%M:%S")
 
-        # Row background tint by severity
-        if is_botnet or score >= 2:
+        # Row background tint by severity. The Score/Sniff columns were
+        # removed from the visible table, but we still tint the row based on
+        # the underlying suspicion bucket so dangerous flows remain easy to
+        # spot at a glance. score_bucket is the visual bucket (0/1/2) derived
+        # from the source scorer (BotnetMonitor SUSP_THRESHOLD=3.0 or the
+        # legacy scorer's integer cutoff); _on_flow has already mapped it.
+        if is_botnet or score_bucket >= 2:
             row_bg = "#2A1515"      # deep red tint
-        elif score == 1:
+        elif score_bucket == 1:
             row_bg = "#1F1A0E"      # amber tint
         else:
             row_bg = ""             # default
 
-        sniff_icon = "🔴 Yes" if sniff else "—"
-        score_str  = f"{'🔴' if score >= 2 else '🟡' if score == 1 else '🟢'} {score}"
         label_str  = label.capitalize()
         conf_str   = f"{conf:.2%}"
         dev_str    = device.upper()
@@ -544,13 +633,11 @@ class MonitorPage(QWidget):
         src        = f"{flow.get('src_ip','?')}:{flow.get('src_port','?')}"
         dst        = f"{flow.get('dst_ip','?')}:{flow.get('dst_port','?')}"
 
-        values = [ts, src, dst, proto, label_str, conf_str, dev_str, score_str, sniff_icon]
+        values = [ts, src, dst, proto, label_str, conf_str, dev_str]
         colors = [TW, TW, TW, TG,
                   ERR if is_botnet else OK,    # Label
                   TW,                          # Confidence
-                  ACC,                         # Device
-                  ERR if score >= 2 else YEL if score == 1 else OK,   # Score
-                  ERR if sniff else TG]        # Sniff
+                  ACC]                         # Device
 
         r = self._table.rowCount()
         self._table.insertRow(r)
@@ -567,14 +654,13 @@ class MonitorPage(QWidget):
             4: ALIGN_CENTER,  # Label
             5: ALIGN_CENTER,  # Confidence
             6: ALIGN_CENTER,  # Device
-            7: ALIGN_CENTER,  # Score
-            8: ALIGN_CENTER,  # Sniff?
         }
         for j, (val, col) in enumerate(zip(values, colors)):
             item = QTableWidgetItem(val)
             item.setForeground(QColor(col))
             item.setTextAlignment(col_align.get(j, ALIGN_LEFT))
-            if j in (4, 7):
+            if j == 4:
+                # Label column: bold so Botnet/Benign reads clearly.
                 f = QFont(FNT, 11)
                 f.setBold(True)
                 item.setFont(f)

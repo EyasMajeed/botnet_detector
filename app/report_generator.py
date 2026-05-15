@@ -466,7 +466,7 @@ def _render_one_flow_detail(idx: int, flow: Any,
 
     # ── Summary text ────────────────────────────────────────────────
     if summary:
-        parts.append(Paragraph(summary, styles["Body"]))
+        parts.append(Paragraph(_html_safe(summary), styles["Body"]))
         parts.append(Spacer(1, 2*mm))
 
     # ── Top features bar table ──────────────────────────────────────
@@ -498,7 +498,7 @@ def _render_one_flow_detail(idx: int, flow: Any,
             bar_color   = _ERR if attr >= 0 else _OK
             rows.append([
                 Paragraph(_html_safe(disp), styles["Tiny"]),
-                Paragraph(_format_value(val), styles["Tiny"]),
+                Paragraph(_html_safe(_format_value(val)), styles["Tiny"]),
                 Paragraph(f"<font color='{arrow_color}'>{arrow}</font>",
                           styles["Tiny"]),
                 _bar_cell(abs(attr) / max_v, total_width_mm=30, colour=bar_color),
@@ -525,7 +525,7 @@ def _render_one_flow_detail(idx: int, flow: Any,
     recs = xai.get("recommendations", []) if xai else []
     if recs:
         parts.append(Paragraph(
-            f"<b>Recommended action:</b> {recs[0]}",
+            f"<b>Recommended action:</b> {_html_safe(recs[0])}",
             styles["Recommend"]))
 
     return parts
@@ -665,13 +665,24 @@ def _format_value(v: Any) -> str:
     return f"{x:.4f}"
 
 
-def _html_safe(s: str) -> str:
-    """Escape `&` and stray brackets that aren't already valid <font>/<b> tags."""
-    # The colour wrapping uses raw <font> tags, so we only escape `&`
-    # when it's not already part of an HTML entity.
-    if "&" in s and "&amp;" not in s and "&lt;" not in s and "&gt;" not in s:
-        s = s.replace("&", "&amp;")
-    return s
+def _html_safe(s: Any) -> str:
+    """
+    Escape a *plain-text data value* so it is safe to drop into a reportlab
+    Paragraph (whose text is mini-HTML).
+
+    This must escape `<` and `>` as well as `&` — reportlab's parser treats
+    `<...>` as markup, so an unescaped value like "a<b>c" raises a
+    ValueError and aborts the whole PDF. Order matters: escape `&` first so
+    we don't double-escape the `&` we introduce for `<`/`>`.
+
+    Only use this for untrusted *data* (feature names, summaries,
+    recommendations). Do NOT use it on strings where we intentionally embed
+    our own <font>/<b> markup.
+    """
+    s = str(s)
+    return (s.replace("&", "&amp;")
+             .replace("<", "&lt;")
+             .replace(">", "&gt;"))
 
 
 def _color_chip(text: str, hex_color: str) -> Table:

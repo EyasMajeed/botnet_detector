@@ -163,14 +163,22 @@ class DetectionStore(QObject):
         self.reports_changed.emit()
         return rid
 
-    def end_live_session(self) -> None:
-        """Close the active live session and persist. No-op if none active."""
+    def end_live_session(self) -> Optional[str]:
+        """
+        Close the active live session and persist. Returns the report_id that
+        was just closed, or None if there was no active session.
+
+        Returning the rid lets callers (MonitorPage, MainWindow) auto-export
+        the just-finished session without having to look it up afterwards.
+        """
         if self._active_live is None:
-            return
+            return None
+        rid = self._active_live.report_id
         self._active_live.duration_sec = round(time.time() - self._live_started_at, 1)
         self._active_live = None
         self.save()
         self.reports_changed.emit()
+        return rid
 
     def add_live_flow(self, f: DetectionFlow) -> None:
         """Append a flow from MonitorPage's BotnetMonitorThread."""

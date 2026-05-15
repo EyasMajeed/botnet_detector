@@ -4,6 +4,7 @@ Group 07 · CPCS499
 Design: Professional dark SOC dashboard, sidebar nav, 6 pages.
 """
 import sys, os, random, csv
+from typing import Optional
 os.environ.setdefault("KMP_DUPLICATE_LIB_OK", "TRUE")
 os.environ.setdefault("OMP_NUM_THREADS",       "1")
 os.environ.setdefault("MKL_NUM_THREADS",       "1")
@@ -774,6 +775,10 @@ class ReportsPage(QWidget):
         self.tbl.setEditTriggers(QTableWidget.EditTrigger.NoEditTriggers)
         self.tbl.setFixedHeight(360)
         self.tbl.horizontalHeader().setSectionResizeMode(QHeaderView.ResizeMode.Stretch)
+        # Actions column gets a fixed width so View+PDF+CSV buttons fit cleanly
+        # without being cropped on smaller windows.
+        self.tbl.horizontalHeader().setSectionResizeMode(4, QHeaderView.ResizeMode.Fixed)
+        self.tbl.setColumnWidth(4, 230)
         self.tbl.verticalHeader().setDefaultSectionSize(36)
         self.tbl.setStyleSheet(TABLE_CSS())
         hv.addWidget(self.tbl); root.addWidget(hc); root.addStretch()
@@ -807,6 +812,11 @@ class ReportsPage(QWidget):
                 if j == 3:
                     it.setForeground(QColor(ERR if r.n_botnet > 0 else TM))
                 self.tbl.setItem(i, j, it)
+
+            # ── Actions cell: View + per-report PDF export ────────────────
+            # The "PDF" button exports JUST this report (correct metadata
+            # + correct flow set). The page-level "Export PDF" button at
+            # the top still does an all-reports combined export.
             view_btn = QPushButton("View")
             view_btn.setFixedHeight(26)
             view_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
@@ -816,68 +826,100 @@ class ReportsPage(QWidget):
                 f"QPushButton:hover{{background:{ACC}22;border-color:{ACC};}}")
             view_btn.clicked.connect(lambda _checked=False, rid=r.report_id:
                                      self.view_report.emit(rid))
+
+            pdf_btn = QPushButton("PDF")
+            pdf_btn.setFixedHeight(26)
+            pdf_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            pdf_btn.setToolTip("Export a PDF report for this session only")
+            pdf_btn.setStyleSheet(
+                f"QPushButton{{background:transparent;color:{OK};border:1px solid {OK}55;"
+                f"border-radius:6px;padding:0 12px;font-size:11px;font-weight:500;}}"
+                f"QPushButton:hover{{background:{OK}22;border-color:{OK};}}")
+            pdf_btn.clicked.connect(lambda _checked=False, rid=r.report_id:
+                                    self._export(rid, "PDF"))
+
+            csv_btn = QPushButton("CSV")
+            csv_btn.setFixedHeight(26)
+            csv_btn.setCursor(QCursor(Qt.CursorShape.PointingHandCursor))
+            csv_btn.setToolTip("Export a CSV of this session's flows only")
+            csv_btn.setStyleSheet(
+                f"QPushButton{{background:transparent;color:{TG};border:1px solid {BDR};"
+                f"border-radius:6px;padding:0 12px;font-size:11px;}}"
+                f"QPushButton:hover{{color:{TW};border-color:{ACC};}}")
+            csv_btn.clicked.connect(lambda _checked=False, rid=r.report_id:
+                                    self._export(rid, "CSV"))
+
             cell = QWidget(); cl = QHBoxLayout(cell)
-            cl.setContentsMargins(8,4,8,4); cl.addWidget(view_btn); cl.addStretch()
+            cl.setContentsMargins(8, 4, 8, 4); cl.setSpacing(6)
+            cl.addWidget(view_btn); cl.addWidget(pdf_btn); cl.addWidget(csv_btn)
+            cl.addStretch()
             self.tbl.setCellWidget(i, 4, cell)
 
     def _exp(self, fmt: str):
-        if not self.store.flows:
+        """
+        Global "Export PDF" / "Export CSV" button at the top of the page.
+        Exports every flow in the store, combined. For a *single* report's
+        export use the per-row button (calls _export with that rid).
+        """
+        self._export(report_id=None, fmt=fmt)
+
+    def _export(self, report_id: Optional[str], fmt: str):
+        """
+        Export flows to CSV or PDF.
+
+        Parameters
+        ----------
+        report_id : str | None
+            If None → export ALL flows across every report (global summary).
+            If set  → export only the flows that belong to that report.
+        fmt : str
+            "CSV" or "PDF".
+        """
+        # ── 1. Resolve the flow set + matching report (for metadata) ──────
+        if report_id is None:
+            flows  = list(self.store.flows)
+            report = None
+        else:
+            flows  = self.store.flows_for_report(report_id)
+            report = next((r for r in self.store.reports
+                           if r.report_id == report_id), None)
+
+        if not flows:
             QMessageBox.information(
                 self, "Nothing to export",
-                "No detection results yet. Run a live capture or upload a file first.")
+                "No detection results yet. Run a live capture or upload "
+                "a file first."
+                if report_id is None else
+                f"Report {report_id} has no flows to export.")
             return
+
+        # ── 2. Pick the output path ───────────────────────────────────────
         out_dir = self.settings.output_dir
         try:
             Path(out_dir).mkdir(parents=True, exist_ok=True)
         except Exception:
             out_dir = ""
-        default = (str(Path(out_dir) /
-                       f"botnet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt.lower()}")
-                   if out_dir else
-                   f"botnet_report_{datetime.now().strftime('%Y%m%d_%H%M%S')}.{fmt.lower()}")
+
+        # Filename includes the report id when known so successive exports
+        # of different reports don't collide.
+        ts = datetime.now().strftime('%Y%m%d_%H%M%S')
+        suffix = f"_{report_id}" if report_id else "_all"
+        default_name = f"botnet_report{suffix}_{ts}.{fmt.lower()}"
+        default = (str(Path(out_dir) / default_name)
+                   if out_dir else default_name)
+
         p, _ = QFileDialog.getSaveFileName(self, f"Export {fmt}", default,
                                            f"{fmt} Files (*.{fmt.lower()})")
         if not p:
             return
 
+        # ── 3. CSV path ───────────────────────────────────────────────────
         if fmt == "CSV":
-            with open(p, "w", newline="") as fp:
-                w = csv.writer(fp)
-                # CSV header — extended with XAI columns. We flatten the XAI
-                # dict into 4 string columns so spreadsheet tools can read
-                # them. Top features are pipe-separated for parsability.
-                w.writerow(["#","Report","Source","Src IP","Dst IP","Protocol",
-                            "Label","Confidence","Device","S1 Conf","Latency ms",
-                            "Suspicion","Alerted","Timestamp",
-                            "XAI Pattern","XAI Severity","XAI Summary",
-                            "XAI Top Features","XAI Recommendation"])
-                for i, f in enumerate(self.store.flows, 1):
-                    # Pull XAI fields safely — older flows / benign flows
-                    # have xai=None.
-                    xai = getattr(f, "xai", None) or {}
-                    pattern   = xai.get("pattern",  "")
-                    severity  = xai.get("severity", "")
-                    summary   = xai.get("summary",  "")
-                    # Top features → "feature1=value1 (+attr1) | feature2=value2 (+attr2) | ..."
-                    top_str = " | ".join(
-                        f"{tf.get('display', tf.get('feature','?'))}="
-                        f"{tf.get('value', 0):.3f} ({tf.get('attribution', 0):+.3f})"
-                        for tf in xai.get("top_features", [])[:5]
-                    )
-                    rec_str = (xai.get("recommendations") or [""])[0]
-                    w.writerow([i, f.report_id, f.source, f.src_ip, f.dst_ip,
-                                f.protocol, f.label, f"{f.confidence:.4f}",
-                                f.device_type, f"{f.s1_confidence:.4f}",
-                                f"{f.latency_ms:.2f}", f"{f.suspicion:.2f}",
-                                f.alerted,
-                                datetime.fromtimestamp(f.timestamp).strftime("%Y-%m-%d %H:%M:%S"),
-                                pattern, severity, summary, top_str, rec_str])
+            self._write_csv(flows, p)
             QMessageBox.information(self, "Exported", f"CSV saved:\n{p}")
             return
 
-        # PDF path — uses report_generator module. Imported lazily so the GUI
-        # can launch even without reportlab installed; the user only sees the
-        # error if they try to export PDF.
+        # ── 4. PDF path ───────────────────────────────────────────────────
         try:
             from report_generator import generate_pdf_report
         except ImportError as e:
@@ -890,28 +932,77 @@ class ReportsPage(QWidget):
             )
             return
 
+        meta = self._build_report_meta(report_id=report_id,
+                                        report=report,
+                                        flows=flows)
         try:
-            # Build report metadata from the latest report (or aggregate if
-            # multiple). For "all flows" exports we report the total flow
-            # count and "mixed" source rather than tying to one report.
-            reports = list(self.store.reports)
-            if reports:
-                latest = reports[-1]
-                meta = {
-                    "report_id":    latest.report_id,
-                    "source":       latest.source,
-                    "filename":     latest.filename,
-                    "duration_sec": latest.duration_sec,
-                }
-            else:
-                meta = {"report_id": "—", "source": "mixed"}
-            generate_pdf_report(self.store.flows, out_path=p, report_meta=meta)
+            generate_pdf_report(flows, out_path=p, report_meta=meta)
             QMessageBox.information(self, "Exported", f"PDF saved:\n{p}")
         except Exception as e:
             QMessageBox.critical(
                 self, "PDF export failed",
-                f"An error occurred while generating the PDF:\n\n{type(e).__name__}: {e}"
+                f"An error occurred while generating the PDF:\n\n"
+                f"{type(e).__name__}: {e}"
             )
+
+    def _build_report_meta(self, report_id, report, flows) -> dict:
+        """
+        Build the report_meta dict that the PDF cover page renders.
+
+        Two modes:
+          · Single report  → exact rid, source, filename, duration of THAT report.
+          · All flows      → "mixed (N reports)" source, no specific filename.
+                             This avoids the previous bug where the cover page
+                             claimed the latest report's filename even though
+                             the body included flows from older reports.
+        """
+        if report is not None:
+            return {
+                "report_id":    report.report_id,
+                "source":       report.source,
+                "filename":     report.filename,
+                "duration_sec": report.duration_sec,
+            }
+        # Global export — describe the combined data honestly.
+        n_reports = len({getattr(f, "report_id", "") for f in flows
+                         if getattr(f, "report_id", "")})
+        return {
+            "report_id": "ALL",
+            "source":    f"mixed ({n_reports} reports)" if n_reports > 1
+                         else (next(iter(
+                                {getattr(f, "source", "") for f in flows}),
+                                "—") or "—"),
+            "filename":  "All flows in store",
+        }
+
+    def _write_csv(self, flows, path):
+        """Write the given flows to CSV (with XAI columns)."""
+        with open(path, "w", newline="") as fp:
+            w = csv.writer(fp)
+            w.writerow(["#","Report","Source","Src IP","Dst IP","Protocol",
+                        "Label","Confidence","Device","S1 Conf","Latency ms",
+                        "Suspicion","Alerted","Timestamp",
+                        "XAI Pattern","XAI Severity","XAI Summary",
+                        "XAI Top Features","XAI Recommendation"])
+            for i, f in enumerate(flows, 1):
+                xai = getattr(f, "xai", None) or {}
+                pattern  = xai.get("pattern",  "")
+                severity = xai.get("severity", "")
+                summary  = xai.get("summary",  "")
+                top_str = " | ".join(
+                    f"{tf.get('display', tf.get('feature','?'))}="
+                    f"{tf.get('value', 0):.3f} ({tf.get('attribution', 0):+.3f})"
+                    for tf in xai.get("top_features", [])[:5]
+                )
+                rec_str = (xai.get("recommendations") or [""])[0]
+                w.writerow([i, f.report_id, f.source, f.src_ip, f.dst_ip,
+                            f.protocol, f.label, f"{f.confidence:.4f}",
+                            f.device_type, f"{f.s1_confidence:.4f}",
+                            f"{f.latency_ms:.2f}", f"{f.suspicion:.2f}",
+                            f.alerted,
+                            datetime.fromtimestamp(f.timestamp).strftime(
+                                "%Y-%m-%d %H:%M:%S"),
+                            pattern, severity, summary, top_str, rec_str])
 
 # ══════════════════════════════════════════════════════════════════════════════
 # PAGE 6 — SETTINGS
@@ -1026,7 +1117,7 @@ class SettingsPage(QWidget):
         clr.clicked.connect(self._clear_all)
         root.addWidget(scard("Data", [
             (("Reset detection store",
-              "Wipes all flows + reports from disk. Cannot be undone."), clr),
+              "Wipes all flows + reports from app. Cannot be undone."), clr),
         ]))
 
         root.addStretch()
@@ -1095,6 +1186,9 @@ class MainWindow(QMainWindow):
         # ── Cross-page wiring ────────────────────────────────────────────────
         # Upload finishes → push results into the store as an upload Report.
         self.upload_page.analysis_done.connect(self._on_upload_done)
+        # Monitor "Stop" finalises a live session → MainWindow gets a chance
+        # to auto-export it just like an upload.
+        self.monitor_page.session_ended.connect(self._on_live_session_ended)
         # Reports "View" button → switch to Results filtered by that report.
         self.reports_page.view_report.connect(self._on_view_report)
         # Dashboard "View All" → switch to Results, no filter.
@@ -1113,17 +1207,35 @@ class MainWindow(QMainWindow):
         inference_bridge.run_file_inference. We translate them into
         DetectionFlows and register a new upload-source Report in the store.
 
-        Note: the current run_file_inference is Stage-1-only — IoT rows are
-        labelled 'unknown' and Non-IoT rows are labelled 'benign' as a fallback.
-        Wire real Stage-2 batch inference later in inference_bridge — no changes
-        to this slot will be needed.
+        Field map (result-dict key → DetectionFlow attribute):
+            src_ip, dst_ip, src_port, dst_port, protocol  → direct
+            label, confidence                              → via apply_threshold
+            device_type, stage1_conf, latency_ms           → direct
+            xai                                            → direct (PCAP path)
+            alerted, suspicion, timestamp                  → direct (PCAP path)
+
+        These last three were previously dropped on the floor, which is why
+        uploaded PCAPs showed Alerted=False / Suspicion=0.00 across the board
+        even though monitoring.py's BotnetMonitor was computing both correctly.
+        See inference_bridge._detection_results_to_dicts for the upstream fix.
+
+        Note: CSV uploads still won't have alerted/suspicion populated because
+        run_csv_inference doesn't run the suspicion scorer or alert logic
+        (those live in BotnetMonitor, which is PCAP-only). That's by design.
         """
         from detection_store import apply_threshold
         thresh = self.settings.confidence_threshold
         flows = []
+        xai_attached = 0
+        botnet_count = 0
         for r in results or []:
             raw_label = str(r.get("label", "benign"))
             conf      = float(r.get("confidence", 0.0))
+            xai_dict  = r.get("xai")
+            if raw_label == "botnet":
+                botnet_count += 1
+                if xai_dict is not None:
+                    xai_attached += 1
             # Apply user threshold — preserves 'unknown' for IoT-from-CSV rows.
             flows.append(DetectionFlow(
                 src_ip        = str(r.get("src_ip", "") or ""),
@@ -1135,11 +1247,29 @@ class MainWindow(QMainWindow):
                 confidence    = conf,
                 device_type   = str(r.get("device_type", "noniot")),
                 s1_confidence = float(r.get("stage1_conf", 0.0)),
+                suspicion     = float(r.get("suspicion", 0.0)),     # NEW
                 latency_ms    = float(r.get("latency_ms", 0.0)),
-                xai           = r.get("xai"),    # XAI explanation dict (or None)
+                alerted       = bool(r.get("alerted", False)),       # NEW
+                timestamp     = float(r.get("timestamp", 0.0))       # NEW
+                                or datetime.now().timestamp(),
+                xai           = xai_dict,
             ))
         if not flows:
             return
+        # ── One-shot diagnostic so XAI silently missing is impossible. ───
+        # If we ever see "0 / N botnet flows have XAI" again, the user knows
+        # immediately instead of finding out by opening an empty PDF.
+        if botnet_count > 0:
+            pct = 100 * xai_attached / botnet_count
+            marker = "OK" if xai_attached == botnet_count else "WARN"
+            print(f"[upload] [{marker}] XAI attached to "
+                  f"{xai_attached}/{botnet_count} botnet flows ({pct:.0f}%)")
+            if xai_attached < botnet_count:
+                try:
+                    from inference_bridge import get_xai_status
+                    print(f"[upload] XAI status: {get_xai_status()}")
+                except Exception:
+                    pass
         # Best-effort filename — UploadPage internals are not exposed.
         fname = "<uploaded file>"
         try:
@@ -1151,20 +1281,72 @@ class MainWindow(QMainWindow):
         rid = self.store.add_upload_batch(flows, fname)
         # Auto-export if the user opted in.
         if self.settings.auto_export_reports:
-            try:
-                out = Path(self.settings.output_dir)
-                out.mkdir(parents=True, exist_ok=True)
-                p = out / f"{rid}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv"
-                with open(p, "w", newline="") as fp:
-                    w = csv.writer(fp)
-                    w.writerow(["#","Src IP","Dst IP","Protocol","Label",
-                                "Confidence","Device","S1 Conf","Latency ms"])
-                    for i, f in enumerate(flows, 1):
-                        w.writerow([i, f.src_ip, f.dst_ip, f.protocol, f.label,
-                                    f"{f.confidence:.4f}", f.device_type,
-                                    f"{f.s1_confidence:.4f}", f"{f.latency_ms:.2f}"])
-            except Exception as e:
-                print(f"[auto_export] failed: {e!r}")
+            self._auto_export_report(rid)
+
+    def _on_live_session_ended(self, report_id: str):
+        """
+        Called when MonitorPage stops a live capture and the store closed
+        a live-session Report. Auto-exports if enabled, same as upload.
+        """
+        if not report_id:
+            return
+        if self.settings.auto_export_reports:
+            self._auto_export_report(report_id)
+
+    def _auto_export_report(self, report_id: str) -> None:
+        """
+        Save a CSV + PDF of one finished report to settings.output_dir,
+        without prompting the user. Used by both upload and live-end paths.
+
+        Failures are logged but never raised — auto-export is best-effort:
+        we don't want a missing reportlab install to crash the GUI after
+        a long capture.
+        """
+        flows = self.store.flows_for_report(report_id)
+        if not flows:
+            return
+        report = next((r for r in self.store.reports
+                       if r.report_id == report_id), None)
+        try:
+            out_dir = Path(self.settings.output_dir)
+            out_dir.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            print(f"[auto_export] could not create output dir: {e!r}")
+            return
+
+        ts   = datetime.now().strftime("%Y%m%d_%H%M%S")
+        stem = f"{report_id}_{ts}"
+
+        # ── CSV (always; same schema as manual export) ────────────────────
+        csv_path = out_dir / f"{stem}.csv"
+        try:
+            self.reports_page._write_csv(flows, csv_path)
+        except Exception as e:
+            print(f"[auto_export] CSV failed: {e!r}")
+
+        # ── PDF (only if reportlab is available) ──────────────────────────
+        try:
+            from report_generator import generate_pdf_report
+        except ImportError:
+            print("[auto_export] reportlab not installed — skipping PDF")
+            return
+
+        meta = (
+            {
+                "report_id":    report.report_id,
+                "source":       report.source,
+                "filename":     report.filename,
+                "duration_sec": report.duration_sec,
+            }
+            if report is not None else
+            {"report_id": report_id, "source": "—"}
+        )
+        pdf_path = out_dir / f"{stem}.pdf"
+        try:
+            generate_pdf_report(flows, out_path=pdf_path, report_meta=meta)
+            print(f"[auto_export] saved {pdf_path}")
+        except Exception as e:
+            print(f"[auto_export] PDF failed: {e!r}")
 
     def _on_view_report(self, report_id: str):
         self.results_page.filter_by_report(report_id)
@@ -1187,10 +1369,18 @@ class MainWindow(QMainWindow):
     
     def closeEvent(self, event):
         """Stop background work cleanly so threads don't outlive the GUI."""
-        # 1. Live capture (sniff loop)
+        # 1. Live capture (sniff loop). stop_capture() will also call
+        #    store.end_live_session() so duration_sec is finalised before
+        #    we persist below.
         try:
             if hasattr(self, "monitor_page") and getattr(self.monitor_page, "_running", False):
                 self.monitor_page.stop_capture()
+        except Exception:
+            pass
+        # 1b. Belt-and-braces: if the user closed the app without ever
+        #     pressing Stop, force the live session closed here too.
+        try:
+            self.store.end_live_session()
         except Exception:
             pass
         # 2. PCAP inference worker (if user closes mid-job)

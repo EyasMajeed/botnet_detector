@@ -109,18 +109,53 @@ def _attach_xai(result: Dict[str, Any], seq: np.ndarray) -> None:
         return
     try:
         from src.xai import explain_flow
-        result["xai"] = explain_flow(
+        raw = explain_flow(
             seq,
             stage1_label = result.get("device_type", "noniot"),
             stage2_label = "botnet",
             bundle       = bundle,
             top_k        = 8,
         )
+        # Same JSON-safety guard the PCAP path uses (see _coerce_xai_to_json_safe).
+        # Belt-and-braces against numpy floats leaking through SHAP / IG output.
+        result["xai"] = _coerce_xai_to_json_safe(raw)
     except Exception as e:
         # explain_flow() is supposed to never raise (it has its own try/except),
         # but we double-belt-and-braces anyway because this is in the hot path.
         print(f"[xai] explain_flow() unexpectedly raised: {e!r}")
         result["xai"] = None
+
+
+def get_xai_status() -> Dict[str, Any]:
+    """
+    Diagnostic snapshot of the XAI subsystem. Called once per upload so the
+    user can see whether explanations are active. Returns:
+        {
+          "bridge_bundle_ready": bool,
+          "bridge_disabled_reason": str,  # empty if no failure
+          "monitoring_bundle_ready": bool | None,  # None = monitoring not loaded yet
+        }
+    """
+    monitor_bundle: Any = None
+    try:
+        # Don't trigger loading — only peek if it's already imported.
+        mod = sys.modules.get("monitoring")
+        if mod is not None:
+            # Sniff the most recently constructed BotnetMonitor's bundle.
+            # If no BotnetMonitor has been constructed yet, this is None.
+            BotnetMonitor = getattr(mod, "BotnetMonitor", None)
+            if BotnetMonitor is not None:
+                # We can't easily reach the instance from here without a
+                # global ref. Just report "unknown" — the real signal is
+                # whether the bridge's own bundle works.
+                monitor_bundle = "loaded but instance state unknown"
+    except Exception:
+        monitor_bundle = None
+    return {
+        "bridge_bundle_ready":      _xai_bundle is not None,
+        "bridge_disabled_reason":   _xai_disabled_reason,
+        "monitoring_module_loaded": monitor_bundle is not None,
+    }
 
 
 # ═════════════════════════════════════════════════════════════════════════════
@@ -524,9 +559,20 @@ def _detection_results_to_dicts(detection_results: List[Any],
 
     `t0` is a perf_counter() snapshot taken when packet processing started;
     it's used to compute an average per-row latency stamped onto every dict.
+
+    HISTORY: an earlier version of this function dropped DetectionResult's
+    `xai`, `alerted`, `suspicion_score`, `timestamp`, and `s1_method` fields
+    on the floor. BotnetMonitor populates all of them — `xai` for every
+    botnet flow, `alerted` per the GUI threshold, `suspicion_score` from
+    the heuristic scorer. Losing them at this seam meant uploaded PCAPs
+    rendered with empty XAI columns, Alerted=False for every row, and
+    Suspicion=0.00 across the board, even though the underlying detection
+    pipeline was computing all three correctly.
     """
     out: List[Dict[str, Any]] = []
     for i, r in enumerate(detection_results, 1):
+        # Parse src/dst ports + protocol out of the flow_id string.
+        # Format: "IP_LO:SPORT<->IP_HI:DPORT/PROTO_NUM"
         src_port = dst_port = 0
         proto    = "—"
         try:
@@ -537,8 +583,17 @@ def _detection_results_to_dicts(detection_results: List[Any],
             src_port = int(sp); dst_port = int(dp)
             proto    = {"6":"TCP","17":"UDP","1":"ICMP"}.get(p, p)
         except Exception:
-            # Malformed flow_id — leave ports/proto as defaults
+            # Malformed flow_id — leave ports/proto as defaults rather than
+            # dropping the entire row. The label + confidence are still useful.
             pass
+
+        # Safely coerce the XAI dict to JSON-friendly Python primitives.
+        # The DetectionStore persists every flow via json.dump, so a numpy
+        # float32 leaking out of integrated_gradients would crash save().
+        # We do this defensively here, ONE place, instead of trying to
+        # police the XAI module's internals.
+        xai = _coerce_xai_to_json_safe(getattr(r, "xai", None))
+
         out.append({
             "row":         i,
             "src_ip":      r.src_ip,
@@ -550,9 +605,83 @@ def _detection_results_to_dicts(detection_results: List[Any],
             "label":       r.label,
             "confidence":  float(r.s2_confidence),
             "stage1_conf": float(r.s1_confidence),
+            # ── Fields the old version dropped — restored. ────────────────
+            "suspicion":   float(getattr(r, "suspicion_score", 0.0)),
+            "alerted":     bool(getattr(r, "alerted", False)),
+            "timestamp":   float(getattr(r, "timestamp", time.time())),
+            "s1_method":   str(getattr(r, "s1_method", "ml")),
+            "xai":         xai,
         })
 
     avg_ms = round((time.perf_counter() - t0) * 1000 / max(len(out), 1), 2)
     for o in out:
         o["latency_ms"] = avg_ms
     return out
+
+
+# ═════════════════════════════════════════════════════════════════════════════
+# JSON-safety coercion for XAI dicts
+# ═════════════════════════════════════════════════════════════════════════════
+
+def _coerce_xai_to_json_safe(xai: Any) -> Optional[Dict[str, Any]]:
+    """
+    Walk an XAI explanation dict and convert numpy scalars to Python
+    primitives so DetectionStore.save() (json.dump) doesn't choke.
+
+    Why this exists
+    ---------------
+    The local explainers compute attributions via PyTorch (Integrated
+    Gradients) or SHAP — both can return tensors / numpy float32 / numpy
+    int64. The XAI module's `_result_dict` casts the top-level `confidence`
+    to `float()` but the nested `top_features[*].value` and `feature_importance`
+    values are not guaranteed to be Python primitives. One leaked numpy
+    scalar = `TypeError: Object of type float32 is not JSON serializable`
+    when the store tries to persist the flow, which would silently corrupt
+    the WHOLE batch (not just one flow).
+
+    Defensive coercion at this single boundary point is cheaper than
+    auditing every XAI code path forever.
+
+    Notes
+    -----
+    - Returns None unchanged. Returns the same shape otherwise.
+    - Does NOT round / truncate — only changes types.
+    - Handles nested lists / dicts / tuples recursively.
+    """
+    if xai is None:
+        return None
+    try:
+        return _to_json_primitive(xai)
+    except Exception as e:
+        # If coercion itself blows up (e.g. cyclic structure), return a
+        # minimal degraded dict rather than dropping the whole detection.
+        print(f"[xai] coercion failed: {e!r} — XAI dropped for this flow")
+        return None
+
+
+def _to_json_primitive(obj: Any) -> Any:
+    """Recursive helper for _coerce_xai_to_json_safe."""
+    # Fast path for already-safe primitives
+    if obj is None or isinstance(obj, (bool, int, float, str)):
+        return obj
+    # numpy scalars expose .item() that returns a Python primitive
+    if hasattr(obj, "item") and callable(obj.item):
+        try:
+            v = obj.item()
+            if isinstance(v, (bool, int, float, str)):
+                return v
+        except Exception:
+            pass
+    # numpy arrays → lists (rare in XAI output but possible)
+    if hasattr(obj, "tolist") and callable(obj.tolist) and not isinstance(obj, (list, tuple, dict)):
+        try:
+            return _to_json_primitive(obj.tolist())
+        except Exception:
+            pass
+    # Containers — recurse
+    if isinstance(obj, dict):
+        return {str(k): _to_json_primitive(v) for k, v in obj.items()}
+    if isinstance(obj, (list, tuple)):
+        return [_to_json_primitive(v) for v in obj]
+    # Unknown — last-resort string repr so we never lose the whole flow
+    return str(obj)
