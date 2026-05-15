@@ -133,8 +133,60 @@ class HumanExplanation:
 # ══════════════════════════════════════════════════════════════════════
 
 def _values(expl: LocalExplanation) -> dict[str, float]:
-    """Return {feature: raw_value} from the top features."""
+    """
+    Return {feature: raw_value} for ALL features the explainer saw, not
+    just the top-K by attribution. Pattern matchers need to check feature
+    values (e.g. flag_syn >= 5, flow_pkts_per_sec >= 500) regardless of
+    whether those features ranked in the top attributions — otherwise
+    a model that attributes mostly to header_length still won't trigger
+    PORT_SCAN even when the flow IS a port scan.
+
+    Falls back to top_features-only values for backward compatibility
+    with older LocalExplanation instances that have no all_values dict.
+    """
+    if getattr(expl, "all_values", None):
+        return dict(expl.all_values)
     return {f.feature: f.value for f in expl.top_features}
+
+
+# ─── Cross-schema feature accessor ────────────────────────────────────
+# The trained Stage-2 Non-IoT model uses 46 features with lowercase
+# flag names (flag_syn) and some renamed fields (protocol_num,
+# bytes_per_second, packets_per_second). The Stage-1 schema uses
+# capitalised flags (flag_SYN) and slightly different names (protocol,
+# flow_bytes_per_sec, flow_pkts_per_sec). This helper accepts either
+# spelling and tries known aliases.
+#
+# This is forgiving by design — if a feature genuinely doesn't exist
+# in the model's schema, we return the default rather than raising.
+_FEATURE_ALIASES: dict[str, tuple[str, ...]] = {
+    "flag_SYN":           ("flag_SYN", "flag_syn"),
+    "flag_ACK":           ("flag_ACK", "flag_ack"),
+    "flag_RST":           ("flag_RST", "flag_rst"),
+    "flag_FIN":           ("flag_FIN", "flag_fin"),
+    "flag_PSH":           ("flag_PSH", "flag_psh"),
+    "flag_URG":           ("flag_URG", "flag_urg"),
+    "protocol":           ("protocol", "protocol_num"),
+    "flow_bytes_per_sec": ("flow_bytes_per_sec", "bytes_per_second"),
+    "flow_pkts_per_sec":  ("flow_pkts_per_sec", "packets_per_second"),
+}
+
+
+def _g(v: dict[str, float], key: str, default: float = 0.0) -> float:
+    """
+    Resilient feature-value accessor: tries the canonical name AND any
+    known aliases before falling back to the default. Use this in all
+    pattern matchers instead of v.get(key, default).
+    """
+    for k in _FEATURE_ALIASES.get(key, (key,)):
+        if k in v:
+            return float(v[k])
+    return float(default)
+
+
+def _has(v: dict[str, float], key: str) -> bool:
+    """True if `key` (under any of its aliases) exists in `v`."""
+    return any(k in v for k in _FEATURE_ALIASES.get(key, (key,)))
 
 
 def _top_feature_names(expl: LocalExplanation) -> set[str]:
@@ -154,18 +206,22 @@ def _detect_port_scan(expl: LocalExplanation) -> float:
     # current pipeline. They're kept here for forward-compatibility with a
     # future per-window aggregator, gated by _is_meaningful() to prevent
     # false triggering on the forced value.
-    udst = v.get("window_unique_dsts", 0)
+    udst = _g(v, "window_unique_dsts", 0)
     if "window_unique_dsts" in top and _is_meaningful("window_unique_dsts", udst) and udst >= 10:
         score += 0.45
-    wfc = v.get("window_flow_count", 0)
+    wfc = _g(v, "window_flow_count", 0)
     if "window_flow_count" in top and _is_meaningful("window_flow_count", wfc) and wfc >= 20:
         score += 0.30
     # Short flows + few packets per flow + many SYNs → real signals not
     # affected by LIVE_CONSTANT_FEATURES, this is what carries the matcher.
-    if v.get("flow_duration", 999) < 1.0 and v.get("total_fwd_packets", 999) <= 3:
-        score += 0.25
-    if v.get("flag_SYN", 0) >= 5 and v.get("flag_ACK", 0) <= 1:
-        score += 0.20
+    if _g(v, "flow_duration", 999) < 1.0 and _g(v, "total_fwd_packets", 999) <= 3:
+        score += 0.30
+    # SYN scan signature: many SYNs, almost no ACKs back. Weight bumped to
+    # 0.30 because window_unique_dsts and window_flow_count are forced
+    # constants in current modes, so they contribute 0 — the SYN signal
+    # has to carry more weight to cross PATTERN_THRESHOLD.
+    if _g(v, "flag_SYN", 0) >= 5 and _g(v, "flag_ACK", 0) <= 1:
+        score += 0.30
     return min(score, 1.0)
 
 
@@ -173,17 +229,17 @@ def _detect_ddos(expl: LocalExplanation) -> float:
     v = _values(expl)
     score = 0.0
     # Sustained extreme packet rate — primary DDoS signal
-    if v.get("flow_pkts_per_sec", 0) >= 500:
+    if _g(v, "flow_pkts_per_sec", 0) >= 500:
         score += 0.45
-    if v.get("flow_bytes_per_sec", 0) >= 1_000_000:
+    if _g(v, "flow_bytes_per_sec", 0) >= 1_000_000:
         score += 0.20
     # Forward-heavy traffic: many fwd packets, very few bwd (target overwhelmed)
-    fwd = v.get("total_fwd_packets", 0)
-    bwd = v.get("total_bwd_packets", 1)
+    fwd = _g(v, "total_fwd_packets", 0)
+    bwd = _g(v, "total_bwd_packets", 1)
     if fwd >= 100 and (bwd == 0 or fwd / max(bwd, 1) >= 50):
         score += 0.20
     # Tight inter-arrival times
-    if v.get("flow_iat_mean", 999) < 0.001:
+    if _g(v, "flow_iat_mean", 999) < 0.001:
         score += 0.15
     return min(score, 1.0)
 
@@ -194,16 +250,16 @@ def _detect_c2_beacon(expl: LocalExplanation) -> float:
     score = 0.0
     # periodicity_score is forced to 0.0 in current modes; this branch
     # contributes 0 unless a future per-window aggregator computes it.
-    pscore = v.get("periodicity_score", 0)
+    pscore = _g(v, "periodicity_score", 0)
     if "periodicity_score" in top and _is_meaningful("periodicity_score", pscore) and pscore >= 0.7:
         score += 0.45
     # Low IAT std = regular timing — also a beacon signature, not constant
-    if "flow_iat_std" in top and v.get("flow_iat_std", 999) < 0.05:
+    if "flow_iat_std" in top and _g(v, "flow_iat_std", 999) < 0.05:
         score += 0.25
     # Small, uniform packets (control traffic) — real flow features
-    if v.get("fwd_pkt_len_mean", 9999) < 200 and v.get("fwd_pkt_len_std", 9999) < 50:
+    if _g(v, "fwd_pkt_len_mean", 9999) < 200 and _g(v, "fwd_pkt_len_std", 9999) < 50:
         score += 0.20
-    pzr = v.get("payload_zero_ratio", 0)
+    pzr = _g(v, "payload_zero_ratio", 0)
     if _is_meaningful("payload_zero_ratio", pzr) and pzr >= 0.5:
         score += 0.10
     return min(score, 1.0)
@@ -213,13 +269,13 @@ def _detect_dns_tunnel(expl: LocalExplanation) -> float:
     v = _values(expl)
     top = _top_feature_names(expl)
     score = 0.0
-    if "dns_query_count" in top and v.get("dns_query_count", 0) >= 50:
+    if "dns_query_count" in top and _g(v, "dns_query_count", 0) >= 50:
         score += 0.50
     # payload_entropy is forced to 0.0 in current modes
-    pent = v.get("payload_entropy", 0)
+    pent = _g(v, "payload_entropy", 0)
     if "payload_entropy" in top and _is_meaningful("payload_entropy", pent) and pent >= 7.5:
         score += 0.30
-    if v.get("dst_port", 0) == 53 and v.get("flow_bytes_per_sec", 0) > 1000:
+    if int(_g(v, "dst_port", 0)) == 53 and _g(v, "flow_bytes_per_sec", 0) > 1000:
         score += 0.20
     return min(score, 1.0)
 
@@ -227,15 +283,15 @@ def _detect_dns_tunnel(expl: LocalExplanation) -> float:
 def _detect_brute_force(expl: LocalExplanation) -> float:
     v = _values(expl)
     score = 0.0
-    syn = v.get("flag_SYN", 0)
-    rst = v.get("flag_RST", 0)
+    syn = _g(v, "flag_SYN", 0)
+    rst = _g(v, "flag_RST", 0)
     if syn >= 10 and rst >= 5:
         score += 0.40
     # Common login service ports
     LOGIN_PORTS = {22, 23, 21, 3389, 445, 1433, 3306, 5900}
-    if int(v.get("dst_port", 0)) in LOGIN_PORTS:
+    if int(_g(v, "dst_port", 0)) in LOGIN_PORTS:
         score += 0.30
-    if v.get("flow_duration", 999) < 5.0 and syn >= 5:
+    if _g(v, "flow_duration", 999) < 5.0 and syn >= 5:
         score += 0.20
     return min(score, 1.0)
 

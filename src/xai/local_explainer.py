@@ -111,6 +111,12 @@ class LocalExplanation:
     method:            str               # "integrated_gradients" | "shap_tree" | "failed"
     raw_attributions:  dict[str, float]  # all features, signed contributions
     top_features:      list[FeatureContribution]
+    # Full feature values keyed by feature name — the raw, unscaled values
+    # the analyst would actually read off a packet capture. Used by the
+    # explanation_engine pattern matchers to check feature values that
+    # may not be in top_features (e.g. flag_SYN may not be in top-K by
+    # attribution magnitude but is still essential for PORT_SCAN matching).
+    all_values:        dict[str, float] = field(default_factory=dict)
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -237,6 +243,7 @@ class Stage1Explainer:
             method="shap_tree",
             raw_attributions=raw,
             top_features=top,
+            all_values={f: float(feat.get(f, 0.0)) for f in self._features},
         )
 
 
@@ -345,12 +352,21 @@ class _Stage2BaseIGExplainer:
                 direction=direction,
             ))
 
+        # Build the all_values dict covering EVERY feature (not just top-K).
+        # The rule engine needs this so its matchers can check features
+        # like flag_SYN, flow_pkts_per_sec, dst_port — which may not rank
+        # in the top-K by attribution magnitude but are still essential
+        # for pattern recognition.
+        all_values = {self._feature_cols[i]: self._raw_value_for(flow_input, i)
+                      for i in range(self._n_features)}
+
         return LocalExplanation(
             prediction=prediction,
             confidence=float(prob),
             method="integrated_gradients",
             raw_attributions=raw,
             top_features=top,
+            all_values=all_values,
         )
 
     # ── IG implementation ───────────────────────────────────────────
