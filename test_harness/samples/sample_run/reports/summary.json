@@ -1,0 +1,617 @@
+{
+  "generated_at": "2026-05-10T12:27:24.349351Z",
+  "totals": {
+    "PASS": 9,
+    "FAIL": 0,
+    "ERROR": 0,
+    "SKIPPED": 4
+  },
+  "n_tests": 13,
+  "entries": [
+    {
+      "test_id": "M-00",
+      "spec": {
+        "test_id": "M-00",
+        "name": "Schema drift",
+        "target": "test_harness.ml_tests.t_schema_drift:run",
+        "phase": "A",
+        "severity": "CRITICAL",
+        "timeout_sec": 30,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-00",
+        "name": "Schema drift",
+        "severity": "CRITICAL",
+        "verdict": "PASS",
+        "expected": "feature lists identical",
+        "actual": "both lists have 56 features in same order",
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.274,
+        "stdout_path": "/home/claude/test_harness/logs/M-00/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/M-00/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.022,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 8.7,
+          "avg_rss_mb": 8.7,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/M-00/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-01",
+      "spec": {
+        "test_id": "F-01",
+        "name": "Truncated PCAPNG",
+        "target": "test_harness.parsers.t_file_handler_safety:t_pcapng_truncated",
+        "phase": "A",
+        "severity": "MEDIUM",
+        "timeout_sec": 30,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-01",
+        "name": "Truncated PCAPNG",
+        "severity": "MEDIUM",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "validator handled cleanly: {'is_valid': True, 'format': 'PCAPNG', 'error': '', 'size_mb': 3.719329833984375e-05, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-01/trunc.pcapng",
+        "raw": {
+          "is_valid": true,
+          "format": "PCAPNG",
+          "error": "",
+          "size_mb": 3.719329833984375e-05,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.254,
+        "stdout_path": "/home/claude/test_harness/logs/F-01/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-01/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.0,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 4.9,
+          "avg_rss_mb": 4.9,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-01/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-02",
+      "spec": {
+        "test_id": "F-02",
+        "name": "Claimed-huge PCAP",
+        "target": "test_harness.parsers.t_file_handler_safety:t_pcap_huge_claimed",
+        "phase": "A",
+        "severity": "HIGH",
+        "timeout_sec": 30,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-02",
+        "name": "Claimed-huge PCAP header",
+        "severity": "HIGH",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "detected as PCAP without parsing body: {'is_valid': True, 'format': 'PCAP', 'error': '', 'size_mb': 0.00040435791015625, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-02/huge_claim.pcap",
+        "raw": {
+          "is_valid": true,
+          "format": "PCAP",
+          "error": "",
+          "size_mb": 0.00040435791015625,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.255,
+        "stdout_path": "/home/claude/test_harness/logs/F-02/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-02/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.001,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 5.6,
+          "avg_rss_mb": 5.6,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-02/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-03",
+      "spec": {
+        "test_id": "F-03",
+        "name": "Oversized CSV",
+        "target": "test_harness.parsers.t_file_handler_safety:t_csv_oversized",
+        "phase": "A",
+        "severity": "MEDIUM",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-03",
+        "name": "Oversized CSV",
+        "severity": "MEDIUM",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "detected: {'is_valid': True, 'format': 'GENERIC_CSV', 'error': '', 'size_mb': 50.000163078308105, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-03/huge.csv",
+        "raw": {
+          "is_valid": true,
+          "format": "GENERIC_CSV",
+          "error": "",
+          "size_mb": 50.000163078308105,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 7.272,
+        "stdout_path": "/home/claude/test_harness/logs/F-03/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-03/stderr.txt",
+        "resources": {
+          "samples": 29,
+          "duration_sec": 7.018,
+          "peak_cpu_pct": 103.8,
+          "avg_cpu_pct": 95.5,
+          "peak_rss_mb": 78.7,
+          "avg_rss_mb": 34.3,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-03/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-04",
+      "spec": {
+        "test_id": "F-04",
+        "name": "Header-only CSV",
+        "target": "test_harness.parsers.t_file_handler_safety:t_csv_header_only",
+        "phase": "A",
+        "severity": "MEDIUM",
+        "timeout_sec": 15,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-04",
+        "name": "Header-only CSV",
+        "severity": "MEDIUM",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "validator did not crash: {'is_valid': True, 'format': 'GENERIC_CSV', 'error': '', 'size_mb': 0.0003108978271484375, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-04/header_only.csv",
+        "raw": {
+          "is_valid": true,
+          "format": "GENERIC_CSV",
+          "error": "",
+          "size_mb": 0.0003108978271484375,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.252,
+        "stdout_path": "/home/claude/test_harness/logs/F-04/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-04/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.0,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 0.6,
+          "avg_rss_mb": 0.6,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-04/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-05",
+      "spec": {
+        "test_id": "F-05",
+        "name": "PCAP renamed .csv",
+        "target": "test_harness.parsers.t_file_handler_safety:t_pcap_renamed_csv",
+        "phase": "A",
+        "severity": "LOW",
+        "timeout_sec": 15,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-05",
+        "name": "PCAP renamed .csv",
+        "severity": "LOW",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "magic-byte detection wins over extension: {'is_valid': True, 'format': 'PCAP', 'error': '', 'size_mb': 0.00099945068359375, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-05/src_renamed.csv",
+        "raw": {
+          "is_valid": true,
+          "format": "PCAP",
+          "error": "",
+          "size_mb": 0.00099945068359375,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.253,
+        "stdout_path": "/home/claude/test_harness/logs/F-05/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-05/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.0,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 4.4,
+          "avg_rss_mb": 4.4,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-05/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-07",
+      "spec": {
+        "test_id": "F-07",
+        "name": "UTF-16 BOM CSV",
+        "target": "test_harness.parsers.t_file_handler_safety:t_csv_utf16",
+        "phase": "A",
+        "severity": "HIGH",
+        "timeout_sec": 15,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-07",
+        "name": "UTF-16 CSV",
+        "severity": "HIGH",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "validator flagged or rejected: {'is_valid': False, 'format': 'UNKNOWN', 'error': 'unrecognised magic bytes', 'size_mb': 0.021984100341796875, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-07/utf16.csv",
+        "raw": {
+          "is_valid": false,
+          "format": "UNKNOWN",
+          "error": "unrecognised magic bytes",
+          "size_mb": 0.021984100341796875,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.254,
+        "stdout_path": "/home/claude/test_harness/logs/F-07/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-07/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.0,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 5.1,
+          "avg_rss_mb": 5.1,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-07/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-08",
+      "spec": {
+        "test_id": "F-08",
+        "name": "Random-bytes fuzz x32",
+        "target": "test_harness.parsers.t_file_handler_safety:t_random_bytes_fuzz",
+        "phase": "A",
+        "severity": "MEDIUM",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-08",
+        "name": "Parser fuzzing",
+        "severity": "MEDIUM",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "32/32 fuzz inputs handled cleanly",
+        "pcap": null,
+        "raw": {
+          "n_iters": 32
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.503,
+        "stdout_path": "/home/claude/test_harness/logs/F-08/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-08/stderr.txt",
+        "resources": {
+          "samples": 2,
+          "duration_sec": 0.251,
+          "peak_cpu_pct": 91.9,
+          "avg_cpu_pct": 46.0,
+          "peak_rss_mb": 0.8,
+          "avg_rss_mb": 0.4,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-08/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "F-09",
+      "spec": {
+        "test_id": "F-09",
+        "name": "Zip bomb as pcap",
+        "target": "test_harness.parsers.t_file_handler_safety:t_zip_bomb",
+        "phase": "A",
+        "severity": "MEDIUM",
+        "timeout_sec": 30,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": false,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "F-09",
+        "name": "Zip bomb disguised as pcap",
+        "severity": "MEDIUM",
+        "verdict": "PASS",
+        "expected": "no crash; correct verdict",
+        "actual": "correctly not classified as PCAP: {'is_valid': True, 'format': 'GENERIC_CSV', 'error': '', 'size_mb': 0.0009784698486328125, 'row_count': 0}",
+        "pcap": "/home/claude/test_harness/artifacts/F-09/bomb.pcap",
+        "raw": {
+          "is_valid": true,
+          "format": "GENERIC_CSV",
+          "error": "",
+          "size_mb": 0.0009784698486328125,
+          "row_count": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.253,
+        "stdout_path": "/home/claude/test_harness/logs/F-09/stdout.txt",
+        "stderr_path": "/home/claude/test_harness/logs/F-09/stderr.txt",
+        "resources": {
+          "samples": 1,
+          "duration_sec": 0.0,
+          "peak_cpu_pct": 0.0,
+          "avg_cpu_pct": 0.0,
+          "peak_rss_mb": 2.8,
+          "avg_rss_mb": 2.8,
+          "peak_gpu_mb": null,
+          "csv_path": "/home/claude/test_harness/artifacts/F-09/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "P-02",
+      "spec": {
+        "test_id": "P-02",
+        "name": "Malformed Ethernet",
+        "target": "test_harness.pcap_tests.t_malformed_eth:run",
+        "phase": "A",
+        "severity": "HIGH",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "P-02",
+        "name": "Malformed Ethernet",
+        "severity": "HIGH",
+        "verdict": "SKIPPED",
+        "expected": "(test would have run)",
+        "actual": "skipped via --skip-models"
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.0,
+        "stdout_path": null,
+        "stderr_path": null,
+        "resources": null
+      }
+    },
+    {
+      "test_id": "P-03",
+      "spec": {
+        "test_id": "P-03",
+        "name": "VLAN-tagged frames",
+        "target": "test_harness.pcap_tests.t_vlan_tagged:run",
+        "phase": "A",
+        "severity": "HIGH",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "P-03",
+        "name": "VLAN-tagged frames",
+        "severity": "HIGH",
+        "verdict": "SKIPPED",
+        "expected": "(test would have run)",
+        "actual": "skipped via --skip-models"
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.0,
+        "stdout_path": null,
+        "stderr_path": null,
+        "resources": null
+      }
+    },
+    {
+      "test_id": "P-04",
+      "spec": {
+        "test_id": "P-04",
+        "name": "IPv6-only flows",
+        "target": "test_harness.pcap_tests.t_ipv6_only:run",
+        "phase": "A",
+        "severity": "HIGH",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "P-04",
+        "name": "IPv6-only flows",
+        "severity": "HIGH",
+        "verdict": "SKIPPED",
+        "expected": "(test would have run)",
+        "actual": "skipped via --skip-models"
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.0,
+        "stdout_path": null,
+        "stderr_path": null,
+        "resources": null
+      }
+    },
+    {
+      "test_id": "P-07",
+      "spec": {
+        "test_id": "P-07",
+        "name": "Backwards timestamps",
+        "target": "test_harness.pcap_tests.t_timestamp_reversal:run",
+        "phase": "A",
+        "severity": "HIGH",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "P-07",
+        "name": "Backwards timestamps",
+        "severity": "HIGH",
+        "verdict": "SKIPPED",
+        "expected": "(test would have run)",
+        "actual": "skipped via --skip-models"
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 0.0,
+        "stdout_path": null,
+        "stderr_path": null,
+        "resources": null
+      }
+    }
+  ]
+}

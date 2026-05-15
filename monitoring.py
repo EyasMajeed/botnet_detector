@@ -6,24 +6,34 @@
 ║  ARCHITECTURE                                                               ║
 ║                                                                              ║
 ║  Every packet (parallel, silent):                                            ║
-║      KitsuneExtractor.update() → MinMaxScaler → per-src_ip deque           ║
+║      KitsuneExtractor.update() → per-src_ip deque (RAW vectors)            ║
 ║      (buffer fills continuously; no inference fires here)                   ║
+║      Per-packet MinMaxScaler call was REMOVED in the ST-2 fix —            ║
+║      scaling now happens once per completed flow on the read side.          ║
 ║                                                                              ║
 ║  On flow completion (FIN/RST/idle) — Stage-1 gates Stage-2:                ║
 ║      FlowRecord → flow_feature_extractor() → 56-feature dict               ║
 ║               │                                                              ║
 ║          Stage-1 RF  (+ StandardScaler if s1_scaler.json exists)           ║
 ║               │ "iot" | "noniot"                                             ║
-║               ├── "iot"    → read Kitsune deque (already filled)           ║
+║               ├── "iot"    → read Kitsune deque (raw) → batch-scale        ║
 ║               │              → Stage-2 IoT CNN-LSTM → "botnet"|"benign"    ║
 ║               └── "noniot" → stage2_preprocess_non_iot()                   ║
 ║                              → Stage-2 Non-IoT CNN-LSTM → "botnet"|"benign"║
 ║                                                                              ║
+║  PATCH NOTES (Group 07):                                                    ║
+║    SC-K — Kitsune key explosion: handled inside src/live/kitsune_extractor.║
+║           py via LRUDefaultDict (per-dict cap 10 000 streams).             ║
+║    RT-1 — Slow-beacon blind spot: FLOW_IDLE_TIMEOUT default raised 30s→    ║
+║           120s; new BeaconTracker captures cross-flow temporal periodicity.║
+║           Override timeout via env var FLOW_IDLE_TIMEOUT.                  ║
+║    ST-2 — Throughput: per-packet scaler call removed from process_packet.  ║
+║           IoT sequences are now scaled once per flow completion.            ║
+║                                                                              ║
 ║  WHY KITSUNE STILL RUNS PER-PACKET:                                         ║
-║      Stage-1 fires on flow completion (up to 30s after the first packet).  ║
-║      Kitsune's exponential-decay windows must accumulate continuously or    ║
-║      the buffer is empty at routing time. Kitsune runs silently on every    ║
-║      packet; inference only fires when Stage-1 routes to "iot".            ║
+║      Stage-1 fires on flow completion (up to FLOW_IDLE_TIMEOUT after the   ║
+║      first packet). Kitsune's exponential-decay windows must accumulate    ║
+║      continuously or the buffer is empty at routing time.                   ║
 ║                                                                              ║
 ║  STAGE-1 SCALER NOTE:                                                        ║
 ║  classifier.py trains on an already-normalised CSV (preprocess_from_        ║
@@ -148,7 +158,19 @@ SCALER_S2_NONIOT_LIVE = _ep(
 
 IOT_SEQ_LEN       = 20
 NONIOT_SEQ_LEN    = 20
-FLOW_IDLE_TIMEOUT = 30.0
+
+# ── FLOW_IDLE_TIMEOUT (Bug RT-1) ──────────────────────────────────────────────
+# Raised from 30s → 120s default so slow C2 beacons (typically 30–90s spacing)
+# accumulate into a single FlowRecord rather than fragmenting into one-row
+# flows that the LSTM can't see a temporal pattern in.
+#
+# Configurable via env var so labs / CI can keep the old 30s for datasets
+# where flows are short by definition (CIC-IDS-2017 etc.).
+#
+# Trade-off: longer timeout means open-flow memory rises proportionally.
+# The MAX_TRACKED_IPS * 20 cap in FlowAggregator (10 000 flows) bounds this.
+FLOW_IDLE_TIMEOUT = float(os.environ.get("FLOW_IDLE_TIMEOUT", "120.0"))
+
 ALERT_COOLDOWN    = 10.0
 MAX_TRACKED_IPS   = 500
 
@@ -400,6 +422,8 @@ def suspicion_scoring(feat: Dict[str, float]) -> Tuple[float, bool]:
           Added TLS exemption on pkt-rate rule (+2.0 → +0.5 for encrypted
           flows) and skipped SYN-ratio check for web ports (80/443/8080/8443)
           to eliminate false positives from TLS resumption / HTTP-2 bursts.
+      v3 (Bug RT-1): periodicity-based +score block added so cross-flow
+          C2 beacon signal from BeaconTracker actually moves the score.
     """
     score    = 0.0
     dst_port = int(feat.get("dst_port", 0))
@@ -440,6 +464,19 @@ def suspicion_scoring(feat: Dict[str, float]) -> Tuple[float, bool]:
     if feat.get("window_flow_count", 0) > 50:
         score += 1.5
 
+    # ── Periodic-beacon indicator (Bug RT-1) ────────────────────────────────
+    # Strong, regular timing across flows is a primary slow-beacon C2
+    # signature. periodicity_score is populated by BeaconTracker via
+    # _process_flow; it's bounded to [0, 1]. Score 0 (legacy default in
+    # flow_feature_extractor) contributes nothing, so this block is a no-op
+    # when BeaconTracker is unavailable or insufficient samples have been
+    # collected — preserves prior behaviour for short captures.
+    p = float(feat.get("periodicity_score", 0.0))
+    if p >= 0.7:
+        score += 2.0
+    elif p >= 0.5:
+        score += 1.0
+
     return score, score >= SUSP_THRESHOLD
 
 
@@ -454,6 +491,11 @@ def packet_feature_extractor(src_ip: str,
     Returns the current Kitsune sequence for src_ip as a (IOT_SEQ_LEN, 115)
     array if the buffer is full, else None.
 
+    NOTE (Bug ST-2): Buffers now hold RAW Kitsune vectors. Callers that need
+    scaled values must call s2_iot.stage2_preprocess_iot per-row, or use
+    BotnetMonitor._scale_iot_sequence which is vectorised. This function
+    returns the raw stack to avoid double-scaling.
+
     This replaces the old PacketBuffer which was never populated and returned
     only synthetic random values.  Kitsune is the correct packet-level
     enrichment for IoT detection: its 115 incremental statistics are updated
@@ -463,7 +505,7 @@ def packet_feature_extractor(src_ip: str,
     buf = iot_bufs.get(src_ip)
     if buf is None or len(buf) < IOT_SEQ_LEN:
         return None
-    return np.stack(list(buf))   # (IOT_SEQ_LEN, 115)
+    return np.stack(list(buf))   # (IOT_SEQ_LEN, 115) — RAW values
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -797,13 +839,13 @@ class Stage2IoTDetector:
         log.info("[Stage2-IoT] Model loaded (threshold=%.4f)", self._threshold)
 
     def stage2_preprocess_iot(self, raw_vec: np.ndarray) -> np.ndarray:
-        """MinMax scale one raw Kitsune vector per packet. Called in process_packet()."""
+        """MinMax scale one raw Kitsune vector. Works on 1-D (115,) or 2-D (T, 115)."""
         return np.clip((raw_vec - self._feat_min) / self._denom, 0.0, 1.0).astype(np.float32)
 
     def stage2_predict(self, seq: np.ndarray) -> Tuple[str, float]:
         """
         Run inference on (IOT_SEQ_LEN, 115) — a REAL temporal sequence,
-        one row per packet. NOT tiled.
+        one row per packet. NOT tiled. Sequence must already be scaled.
         """
         x = torch.tensor(seq, dtype=torch.float32).unsqueeze(0)
         with torch.no_grad():
@@ -974,26 +1016,13 @@ class Stage2NonIoTDetector:
     = 150 000) push the sigmoid output to 0.0 for ~87 % of flows.
 
       Priority 1 — noniot_scaler_live.json  (live-calibrated by LiveScalerCalibrator)
-        Fitted on the first N_CALIBRATION_FLOWS=500 observed NonIoT flows.
-        Automatically written by the embedded calibrator.  Restart monitoring.py
-        after it appears to activate it.
-
-      Priority 2 — noniot_scaler.json  (static export from export_noniot_scaler.py)
-        Used as a fallback when the live scaler has not yet been generated.
-        If this was exported from already-normalised data its mean/scale values
-        will be near-identity (mean ≈ 0–0.71, scale ≈ 0.001–1.0) and will
-        not help.  The live calibrator corrects this automatically.
-
-      Priority 3 — no scaler  (degraded mode)
-        Raw values passed directly.  A WARNING is emitted every 100 flows.
-        The pipeline does NOT crash so the rest of the architecture remains
-        testable.
+      Priority 2 — noniot_scaler.json        (static export from export_noniot_scaler.py)
+      Priority 3 — no scaler  (degraded mode; emits warnings)
 
     THRESHOLD OVERRIDE
     ──────────────────
     Checkpoints saved with threshold < 0.30 are overridden to
-    NONIOT_THRESHOLD_OVERRIDE (default 0.50) at load time.  The raw
-    checkpoint value is logged as a WARNING.
+    NONIOT_THRESHOLD_OVERRIDE (default 0.50) at load time.
     """
 
     def __init__(self, model_path: Path,
@@ -1015,9 +1044,6 @@ class Stage2NonIoTDetector:
         self._model.eval()
 
         # ── Threshold override ────────────────────────────────────────────────
-        # Some checkpoint files are saved with dangerously low threshold values
-        # (e.g. 0.01) that cause the model to label virtually every flow as
-        # botnet.  We detect this and replace it with NONIOT_THRESHOLD_OVERRIDE.
         self._threshold = float(ckpt.get("threshold", 0.5))
         if self._threshold < 0.30:
             log.warning(
@@ -1032,9 +1058,6 @@ class Stage2NonIoTDetector:
                  self._n_features, self._threshold, self._seq_len)
 
         # ── Load StandardScaler ───────────────────────────────────────────────
-        # Priority 1: noniot_scaler_live.json  (live-calibrated, most accurate)
-        # Priority 2: noniot_scaler.json        (static export, may be near-identity)
-        # Priority 3: no scaler                 (degraded mode, emits warnings)
         self._s2_mean:  Optional[np.ndarray] = None
         self._s2_scale: Optional[np.ndarray] = None
         self._has_scaler = False
@@ -1105,8 +1128,7 @@ class Stage2NonIoTDetector:
         1. The *raw* row (before any scaling) is forwarded to the
            LiveScalerCalibrator.  Once 500 such rows have been accumulated the
            calibrator fits a StandardScaler on the live distribution and saves
-           it to noniot_scaler_live.json.  The operator is then prompted to
-           restart monitoring.py so the new scaler is loaded.
+           it to noniot_scaler_live.json.
 
         2. StandardScaler normalisation (z = (x - mean) / scale) is applied
            when a scaler is available, exactly matching the training-time
@@ -1151,6 +1173,79 @@ class Stage2NonIoTDetector:
         with torch.no_grad():
             prob = torch.sigmoid(self._model(x)).item()
         return ("botnet" if prob >= self._threshold else "benign"), float(prob)
+
+
+# ══════════════════════════════════════════════════════════════════════════════
+# MODULE: BeaconTracker  (Bug RT-1)
+# ══════════════════════════════════════════════════════════════════════════════
+
+class BeaconTracker:
+    """
+    Per-src_ip cross-flow temporal tracker for slow-beacon C2 detection.
+
+    Why this exists:
+        FlowAggregator splits traffic by 5-tuple + idle timeout. A C2
+        beacon at 30–90s spacing produces ONE packet per flow, and the
+        LSTM never sees > 1 row in its sequence — temporal periodicity
+        is invisible. This tracker maintains a rolling history of packet
+        timestamps PER src_ip across all its flows, then emits two
+        signals when the history is long enough:
+
+          - periodicity_score: 1.0 = perfectly periodic, 0.0 = random
+          - flow_iat_std:      std-dev of inter-packet times (low = regular)
+
+    Cap: HISTORY=200 timestamps per src_ip. Dict size is implicitly bounded
+    by MAX_TRACKED_IPS-style behaviour at the FlowAggregator level; on a
+    very-long-running monitor a manual reset() may be desirable. For the
+    typical SOHO/IoT scope this is bounded by network cardinality.
+    """
+
+    # Minimum packets before we trust the periodicity score.
+    MIN_SAMPLES = 10
+    # History window per src_ip.
+    HISTORY = 200
+
+    def __init__(self):
+        self._times: Dict[str, deque] = defaultdict(
+            lambda: deque(maxlen=self.HISTORY))
+
+    def record(self, src_ip: str, ts: float) -> None:
+        """Record a packet timestamp for this src_ip. Called per-packet."""
+        self._times[src_ip].append(ts)
+
+    def signals(self, src_ip: str) -> Tuple[float, float]:
+        """
+        Return (periodicity_score, iat_std) for src_ip.
+
+        periodicity_score in [0.0, 1.0]:
+            Computed as 1 - (CV of inter-arrival times), clipped to [0, 1].
+            Coefficient of variation = std/mean. A perfectly periodic
+            beacon has CV=0 → score=1.0. Random Poisson traffic has
+            CV~1.0 → score=0.0.
+
+        iat_std:
+            Std-dev of inter-arrival times in seconds. 0 if fewer than
+            MIN_SAMPLES packets seen.
+        """
+        ts = self._times.get(src_ip)
+        if not ts or len(ts) < self.MIN_SAMPLES:
+            return 0.0, 0.0
+        arr  = np.asarray(ts, dtype=np.float64)
+        iats = np.diff(arr)
+        if iats.size == 0 or iats.mean() <= 0:
+            return 0.0, 0.0
+        std  = float(iats.std())
+        mean = float(iats.mean())
+        cv   = std / mean if mean > 1e-9 else 1.0
+        score = max(0.0, min(1.0, 1.0 - cv))
+        return score, std
+
+    def reset(self, src_ip: Optional[str] = None) -> None:
+        """Clear history for one src_ip or all."""
+        if src_ip is None:
+            self._times.clear()
+        else:
+            self._times.pop(src_ip, None)
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1243,11 +1338,10 @@ class BotnetMonitor:
     Stage-1 gates Stage-2 — all inference flows through one path per flow.
 
     KITSUNE (per-packet, silent):
-        Every packet: KitsuneExtractor → MinMax scale → per-src_ip deque.
+        Every packet: KitsuneExtractor → per-src_ip deque (RAW vectors).
         The buffer fills continuously. No inference fires here.
-        Kitsune must run per-packet because its exponential-decay windows
-        need continuous updates — waiting for Stage-1 would leave the buffer
-        empty at routing time (Stage-1 fires up to 30s after the first packet).
+        Per-packet scaling was REMOVED in the ST-2 throughput fix; scaling
+        now happens at flow-completion read-time in _process_flow.
 
     FLOW COMPLETION (per completed flow):
         FIN/RST/idle → FlowAggregator → flow_feature_extractor → Stage-1 RF.
@@ -1255,8 +1349,8 @@ class BotnetMonitor:
         Stage-1 routes to one of two Stage-2 branches:
 
         "iot"    → read the Kitsune deque already accumulated for src_ip
-                   → Stage-2 IoT CNN-LSTM → "botnet"|"benign"
-                   (one result per completed flow, not per N packets)
+                   → batch min/max scale → Stage-2 IoT CNN-LSTM
+                   → "botnet"|"benign" (one result per completed flow)
 
         "noniot" → stage2_preprocess_non_iot → per-src_ip flow-row deque
                    → Stage-2 Non-IoT CNN-LSTM → "botnet"|"benign"
@@ -1285,6 +1379,8 @@ class BotnetMonitor:
         self._iot_bufs:    Dict[str, deque] = defaultdict(lambda: deque(maxlen=IOT_SEQ_LEN))
         self._noniot_bufs: Dict[str, deque] = defaultdict(lambda: deque(maxlen=NONIOT_SEQ_LEN))
         self.aggregator  = FlowAggregator()
+        # Bug RT-1: cross-flow temporal tracker for slow C2 beacons.
+        self.beacons     = BeaconTracker()
 
         # IP → MAC lookup table populated by process_packet. Stage-1 reads
         # this to attempt MAC-based device fingerprinting (Path 3) before
@@ -1322,6 +1418,25 @@ class BotnetMonitor:
                        "botnet": 0, "benign": 0,
                        "alerts": 0, "suspicious_flows": 0}
 
+        # ── XAI per-src_ip rate limit (Bug ST-2b) ───────────────────────
+        # XAI Integrated Gradients costs ~25-150 ms/flow. The current
+        # design assumes <5% botnet rate, but under alert-flood conditions
+        # (port scans, DDoS sweeps where every flow scores botnet) XAI
+        # becomes the throughput bottleneck — measured 38 pps end-to-end
+        # vs 39 783 pps ingest in stress test ST-2b.
+        #
+        # We cache the timestamp of the last XAI computation per src_ip
+        # and skip recomputation if another flow from that source fired
+        # XAI within XAI_MIN_INTERVAL_SEC. Identical attribution patterns
+        # from the same source are uninformative; the cached `xai` from
+        # the most recent flow can be reused at the GUI layer if needed.
+        self._xai_last_ts: Dict[str, float] = {}
+        # 30 seconds is a reasonable "explanation freshness" window — long
+        # enough to absorb burst alerts, short enough to update when an
+        # attacker's TTPs visibly change.
+        self.XAI_MIN_INTERVAL_SEC: float = 30.0
+        self._xai_skipped_count: int = 0
+
         # ── XAI integration ──────────────────────────────────────────────
         # Build the ExplainerBundle once, here, so process_packet can call
         # explain_flow() synchronously on every botnet detection without
@@ -1353,20 +1468,26 @@ class BotnetMonitor:
         self._stats["packets"] += 1
 
         # ── Track src_ip → src_mac mapping for Stage-1 OUI lookup (Path 3) ────
-        # We only see Layer-2 MACs for LAN-side devices (external IPs route
-        # through the local gateway, whose MAC is the LAN gateway's, not
-        # the actual remote host's). So this table only contains LAN devices
-        # — which is exactly the device set we want to fingerprint.
         if src_mac and src_ip not in self._ip_to_mac:
             if len(self._ip_to_mac) >= self._ip_to_mac_max:
                 # Evict oldest entry (Python 3.7+ dicts preserve insertion order)
                 self._ip_to_mac.pop(next(iter(self._ip_to_mac)))
             self._ip_to_mac[src_ip] = src_mac
 
+        # ── Beacon tracker: cross-flow temporal history (Bug RT-1) ────────────
+        # Cheap O(1) per-packet append. Used in _process_flow to populate the
+        # periodicity_score feature for the suspicion scorer.
+        self.beacons.record(src_ip, timestamp)
+
         # ── Kitsune: silent per-packet accumulation ───────────────────────────
         # Runs on every packet regardless of device type. No inference fires
         # here. The buffer fills continuously so it is ready when Stage-1
         # routes a completed flow to the "iot" branch.
+        #
+        # Bug ST-2: stores RAW vectors. Per-packet scaling has been moved to
+        # the read side in _process_flow._scale_iot_sequence. This removes
+        # one numpy allocation per packet and has no effect on output values
+        # because min-max scaling commutes with sequence stacking.
         proto_str = {6: "TCP", 17: "UDP", 1: "ICMP"}.get(proto, "OTHER")
         raw_kit = self.kitsune.update(
             timestamp=timestamp, src_mac=src_mac or src_ip,
@@ -1374,8 +1495,7 @@ class BotnetMonitor:
             src_port=src_port, dst_port=dst_port,
             pkt_len=pkt_len, protocol=proto_str,
         )
-        scaled_kit = self.s2_iot.stage2_preprocess_iot(raw_kit)
-        self._iot_bufs[src_ip].append(scaled_kit)
+        self._iot_bufs[src_ip].append(raw_kit)
 
         # ── Flow aggregation: fires inference on completion via _process_flow ─
         completed = self.aggregator.process_packet(
@@ -1390,6 +1510,18 @@ class BotnetMonitor:
                 results.append(r)
         return results
 
+    def _scale_iot_sequence(self, raw_seq: np.ndarray) -> np.ndarray:
+        """
+        Scale a (T, 115) raw Kitsune sequence using the same min-max scaler
+        applied per-vector by Stage2IoTDetector.stage2_preprocess_iot.
+
+        Bug ST-2 helper. Vectorised: one array op for the whole sequence
+        instead of T separate calls. The scaler in stage2_preprocess_iot
+        is a pointwise linear clip, so its 1D and 2D applications are
+        bit-equivalent.
+        """
+        return self.s2_iot.stage2_preprocess_iot(raw_seq)
+
     def _process_flow(self, rec: FlowRecord) -> Optional[DetectionResult]:
         t0 = time.perf_counter()
         self._stats["flows_completed"] += 1
@@ -1399,10 +1531,28 @@ class BotnetMonitor:
         wcount, wdsts = self.aggregator.window_stats(src_ip)
         feat = flow_feature_extractor(rec, wcount, wdsts)
 
-        susp, is_susp = suspicion_scoring(feat)
+        # ── Bug RT-1: inject beacon-tracker signals into the feature dict ────
+        # The Stage-1 RF was trained with periodicity_score=0 everywhere in
+        # the live distribution (LIVE_CONSTANT_FEATURES). We overwrite that
+        # zero ONLY in the suspicion scorer's view of the dict so it raises
+        # the score for beacon-like flows; the RF still sees the schema-
+        # stable 0.0 unless retrained with a refreshed live-features file.
+        # If you DO retrain Stage-1 with live beacon features, you can pass
+        # feat_with_beacon to s1.stage1_predict instead of feat.
+        beacon_score, beacon_iat_std = self.beacons.signals(src_ip)
+        feat_with_beacon = dict(feat)
+        feat_with_beacon["periodicity_score"] = beacon_score
+        # Only overwrite flow_iat_std if the per-flow value is degenerate
+        # (one-row beacons have near-zero per-flow IAT — the cross-flow std
+        # is the real signal).
+        if feat.get("flow_iat_std", 0.0) <= 0.0 and beacon_iat_std > 0.0:
+            feat_with_beacon["flow_iat_std"] = beacon_iat_std
+
+        susp, is_susp = suspicion_scoring(feat_with_beacon)
         if is_susp:
             self._stats["suspicious_flows"] += 1
-            log.info("  [!] Suspicious flow %s (score=%.1f)", str(rec.key), susp)
+            log.info("  [!] Suspicious flow %s (score=%.1f, periodicity=%.2f)",
+                     str(rec.key), susp, beacon_score)
 
         # ── Stage-1: IoT vs Non-IoT routing ──────────────────────────────────
         # Look up the MAC address for this flow's LAN-side IP. Prefer ip_lo
@@ -1426,7 +1576,10 @@ class BotnetMonitor:
                 log.debug("  [IoT] %-18s Kitsune buffer not full yet (%d/%d) - deferring",
                           src_ip, len(buf), IOT_SEQ_LEN)
                 return None
-            seq = np.stack(list(buf))   # (IOT_SEQ_LEN, 115) — real temporal sequence
+            # Bug ST-2: scale the whole sequence once, here, instead of per-packet
+            # at capture time. This removes ~99% of scaler calls.
+            raw_seq = np.stack(list(buf))                 # (IOT_SEQ_LEN, 115) — RAW
+            seq     = self._scale_iot_sequence(raw_seq)   # same shape, scaled
             label, s2_conf = self.s2_iot.stage2_predict(seq)
 
         else:  # "noniot"
@@ -1448,25 +1601,41 @@ class BotnetMonitor:
         # Synchronous in the Scapy thread per design choice — adds ~150 ms
         # latency per botnet detection for IoT (seq=20×115) and ~95 ms for
         # NonIoT (seq=20×46). At typical 1-5% botnet rates this amortises to
-        # ~5-7 ms/flow average, well within budget. If a high-rate flood
-        # makes this an issue, consider an async worker (separate task).
+        # ~5-7 ms/flow average, well within budget.
+        #
+        # Bug ST-2b fix: per-src_ip rate limit. Under alert-flood conditions
+        # (e.g. port scans where every flow scores botnet), XAI on every
+        # flow throttles end-to-end throughput from 39 kpps to 38 pps. We
+        # skip XAI if another flow from this src_ip fired XAI within the
+        # last XAI_MIN_INTERVAL_SEC. Skipped flows still get their full
+        # DetectionResult — they just inherit no `xai` field. The GUI can
+        # surface the most-recent attribution for that src_ip on click.
         xai_dict = None
         if label == "botnet" and self._xai_bundle is not None:
-            try:
-                from src.xai import explain_flow
-                xai_dict = explain_flow(
-                    seq,
-                    stage1_label = device_type,
-                    stage2_label = "botnet",
-                    bundle       = self._xai_bundle,
-                    top_k        = 8,
-                )
-            except Exception as e:
-                # explain_flow has its own try/except inside so this is
-                # belt-and-braces. We swallow + log to keep capture alive.
-                log.warning("[XAI] explain_flow raised on %s flow %s: %r",
-                            device_type, src_ip, e)
-                xai_dict = None
+            now           = rec.last_seen
+            last_xai_ts   = self._xai_last_ts.get(src_ip, 0.0)
+            should_explain = (now - last_xai_ts) >= self.XAI_MIN_INTERVAL_SEC
+            if should_explain:
+                try:
+                    from src.xai import explain_flow
+                    xai_dict = explain_flow(
+                        seq,
+                        stage1_label = device_type,
+                        stage2_label = "botnet",
+                        bundle       = self._xai_bundle,
+                        top_k        = 8,
+                    )
+                    self._xai_last_ts[src_ip] = now
+                except Exception as e:
+                    # explain_flow has its own try/except inside so this is
+                    # belt-and-braces. We swallow + log to keep capture alive.
+                    log.warning("[XAI] explain_flow raised on %s flow %s: %r",
+                                device_type, src_ip, e)
+                    xai_dict = None
+            else:
+                # Within rate-limit window — skip silently. Counter is for
+                # observability via /stats.
+                self._xai_skipped_count += 1
 
         result = DetectionResult(
             flow_id=str(rec.key), src_ip=src_ip, dst_ip=rec.key.ip_hi,
@@ -1657,6 +1826,7 @@ Quick-start:
 
 Environment overrides:
   MODEL_S1_RF  SCALER_S1_JSON  MODEL_S2_IOT  SCALER_S2_IOT  MODEL_S2_NONIOT
+  FLOW_IDLE_TIMEOUT  (seconds; default 120; affects slow-beacon detection)
         """,
     )
     ap.add_argument("--iface",    type=str,   default=None)
@@ -1688,6 +1858,9 @@ Environment overrides:
     else:
         log.info("[Config] Stage-1 IoT routing threshold: %.3f (default)",
                  IOT_ROUTING_THRESHOLD)
+
+    log.info("[Config] FLOW_IDLE_TIMEOUT: %.1fs (env override via FLOW_IDLE_TIMEOUT)",
+             FLOW_IDLE_TIMEOUT)
 
     if args.no_oui:
         _OUI_OK = False

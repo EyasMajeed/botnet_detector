@@ -1,0 +1,654 @@
+{
+  "n_failures": 8,
+  "entries": [
+    {
+      "test_id": "M-EF",
+      "spec": {
+        "test_id": "M-EF",
+        "name": "Empty-flow regression",
+        "target": "test_harness.ml_tests.t_empty_flow_regression:run",
+        "phase": "B",
+        "severity": "HIGH",
+        "timeout_sec": 120,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-EF",
+        "name": "Empty-flow regression",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "avg confidence < 0.05",
+        "actual": "avg confidence 0.3188 on empty flows is no longer near zero \u2014 scaler may have been re-fit (good) OR something else changed.",
+        "csv": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-EF/empty_flows.csv",
+        "raw": {
+          "avg": 0.318809,
+          "min": 1.3340696796149132e-06,
+          "max": 0.9999988079071045,
+          "n": 200
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 6.866,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-EF/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-EF/stderr.txt",
+        "resources": {
+          "samples": 27,
+          "duration_sec": 6.607,
+          "peak_cpu_pct": 100.7,
+          "avg_cpu_pct": 82.7,
+          "peak_rss_mb": 501.8,
+          "avg_rss_mb": 434.1,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-EF/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "M-WS",
+      "spec": {
+        "test_id": "M-WS",
+        "name": "Window starvation",
+        "target": "test_harness.ml_tests.t_window_starvation:run",
+        "phase": "B",
+        "severity": "HIGH",
+        "timeout_sec": 180,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-WS",
+        "name": "Window starvation",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "F1 drop \u2264 0.05 between balanced and starved",
+        "actual": "F1 drops 62.7 pp under unique-IP starvation: 0.6273 \u2192 0.0; recall drops 85.0 pp (0.85 \u2192 0.0). The LSTM has not seen 1-real + 19-padded sequences at training time.",
+        "csv": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-WS/balanced.csv",
+        "raw": {
+          "balanced": {
+            "tp": 170,
+            "fp": 172,
+            "tn": 28,
+            "fn": 30,
+            "precision": 0.4971,
+            "recall": 0.85,
+            "f1": 0.6273,
+            "accuracy": 0.495
+          },
+          "starved": {
+            "tp": 0,
+            "fp": 0,
+            "tn": 200,
+            "fn": 200,
+            "precision": 0.0,
+            "recall": 0.0,
+            "f1": 0.0,
+            "accuracy": 0.5
+          },
+          "drop_f1": 0.6273,
+          "drop_recall": 0.85
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 27.473,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-WS/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-WS/stderr.txt",
+        "resources": {
+          "samples": 108,
+          "duration_sec": 27.212,
+          "peak_cpu_pct": 99.7,
+          "avg_cpu_pct": 83.1,
+          "peak_rss_mb": 510.4,
+          "avg_rss_mb": 490.6,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-WS/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "RT-1",
+      "spec": {
+        "test_id": "RT-1",
+        "name": "Slow beaconing botnet",
+        "target": "test_harness.pcap_tests.t_slow_beacon:run",
+        "phase": "C",
+        "severity": "HIGH",
+        "timeout_sec": 180,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "RT-1",
+        "name": "Slow beaconing botnet (multi-session)",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "detection rate \u2265 50%",
+        "actual": "only 0/25 (0%) flagged botnet on 25 sessions \u2014 model does not recognise the slow-beacon shape even after _idle=120s fix",
+        "pcap": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/RT-1/multi_session_beacon.pcap",
+        "raw": {
+          "n_results": 25,
+          "n_botnet": 0,
+          "rate": 0.0,
+          "n_sessions_in": 25,
+          "session_period_sec": 35.0,
+          "first_5_labels": [
+            "benign",
+            "benign",
+            "benign",
+            "benign",
+            "benign"
+          ]
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 2.371,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/RT-1/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/RT-1/stderr.txt",
+        "resources": {
+          "samples": 9,
+          "duration_sec": 2.065,
+          "peak_cpu_pct": 100.0,
+          "avg_cpu_pct": 90.9,
+          "peak_rss_mb": 476.7,
+          "avg_rss_mb": 320.9,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/RT-1/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "RT-1b",
+      "spec": {
+        "test_id": "RT-1b",
+        "name": "Slow-C2 evasion (period > idle)",
+        "target": "test_harness.pcap_tests.t_slow_beacon_long:run",
+        "phase": "C",
+        "severity": "HIGH",
+        "timeout_sec": 240,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "RT-1b",
+        "name": "Slow-C2 evasion (period > idle)",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "detection rate \u2265 30%",
+        "actual": "only 0/25 (0%) flagged botnet \u2014 slow-C2 evasion at period > idle is effective. Detection requires cross-session temporal aggregation per src_ip; the LSTM's per-flow input window cannot see across flows.",
+        "pcap": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/RT-1b/slow_c2_beacon.pcap",
+        "raw": {
+          "n_results": 25,
+          "n_botnet": 0,
+          "rate": 0.0,
+          "session_period_sec": 180.0,
+          "first_5_labels": [
+            "benign",
+            "benign",
+            "benign",
+            "benign",
+            "benign"
+          ]
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 2.328,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/RT-1b/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/RT-1b/stderr.txt",
+        "resources": {
+          "samples": 9,
+          "duration_sec": 2.069,
+          "peak_cpu_pct": 100.3,
+          "avg_cpu_pct": 91.9,
+          "peak_rss_mb": 477.5,
+          "avg_rss_mb": 324.3,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/RT-1b/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "M-ADV",
+      "spec": {
+        "test_id": "M-ADV",
+        "name": "Scaler-aware FGSM",
+        "target": "test_harness.ml_tests.t_adversarial_fgsm:run",
+        "phase": "C",
+        "severity": "HIGH",
+        "timeout_sec": 600,
+        "kwargs": {
+          "n_samples": 40,
+          "epsilons": [
+            0.001,
+            0.005,
+            0.01
+          ]
+        },
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-ADV",
+        "name": "Scaler-aware adversarial perturbation",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "max routing-flip rate \u2264 30% at any tested \u03b5",
+        "actual": "max flip rate 100% \u2014 Stage-1 is brittle to scaler-aware feature-space perturbations.",
+        "csv": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-ADV/adv_seed.csv",
+        "raw": {
+          "eps=0.001": {
+            "flipped": 67,
+            "attempted": 80,
+            "rate": 0.838
+          },
+          "eps=0.005": {
+            "flipped": 79,
+            "attempted": 80,
+            "rate": 0.988
+          },
+          "eps=0.01": {
+            "flipped": 80,
+            "attempted": 80,
+            "rate": 1.0
+          }
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 409.383,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-ADV/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-ADV/stderr.txt",
+        "resources": {
+          "samples": 1598,
+          "duration_sec": 409.117,
+          "peak_cpu_pct": 100.3,
+          "avg_cpu_pct": 55.9,
+          "peak_rss_mb": 448.6,
+          "avg_rss_mb": 447.4,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-ADV/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "M-T1",
+      "spec": {
+        "test_id": "M-T1",
+        "name": "Threshold sweep (synthetic)",
+        "target": "test_harness.ml_tests.t_threshold_sweep:run",
+        "phase": "B",
+        "severity": "MEDIUM",
+        "timeout_sec": 180,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-T1",
+        "name": "Threshold sweep (synthetic)",
+        "severity": "MEDIUM",
+        "verdict": "FAIL",
+        "expected": "F1 \u2265 0.80 at some threshold; precision and recall both \u2265 0.80",
+        "actual": "best F1 at \u03c4=0.1 only P=0.2828, R=0.205; below 0.80",
+        "csv": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-T1/mixed.csv",
+        "raw": {
+          "sweep": [
+            {
+              "tp": 41,
+              "fp": 104,
+              "tn": 496,
+              "fn": 159,
+              "precision": 0.2828,
+              "recall": 0.205,
+              "f1": 0.2377,
+              "accuracy": 0.6713,
+              "threshold": 0.1
+            },
+            {
+              "tp": 33,
+              "fp": 83,
+              "tn": 517,
+              "fn": 167,
+              "precision": 0.2845,
+              "recall": 0.165,
+              "f1": 0.2089,
+              "accuracy": 0.6875,
+              "threshold": 0.2
+            },
+            {
+              "tp": 30,
+              "fp": 75,
+              "tn": 525,
+              "fn": 170,
+              "precision": 0.2857,
+              "recall": 0.15,
+              "f1": 0.1967,
+              "accuracy": 0.6937,
+              "threshold": 0.3
+            },
+            {
+              "tp": 27,
+              "fp": 67,
+              "tn": 533,
+              "fn": 173,
+              "precision": 0.2872,
+              "recall": 0.135,
+              "f1": 0.1837,
+              "accuracy": 0.7,
+              "threshold": 0.4
+            },
+            {
+              "tp": 26,
+              "fp": 61,
+              "tn": 539,
+              "fn": 174,
+              "precision": 0.2989,
+              "recall": 0.13,
+              "f1": 0.1812,
+              "accuracy": 0.7063,
+              "threshold": 0.5
+            },
+            {
+              "tp": 23,
+              "fp": 57,
+              "tn": 543,
+              "fn": 177,
+              "precision": 0.2875,
+              "recall": 0.115,
+              "f1": 0.1643,
+              "accuracy": 0.7075,
+              "threshold": 0.6
+            },
+            {
+              "tp": 20,
+              "fp": 49,
+              "tn": 551,
+              "fn": 180,
+              "precision": 0.2899,
+              "recall": 0.1,
+              "f1": 0.1487,
+              "accuracy": 0.7137,
+              "threshold": 0.7
+            },
+            {
+              "tp": 18,
+              "fp": 40,
+              "tn": 560,
+              "fn": 182,
+              "precision": 0.3103,
+              "recall": 0.09,
+              "f1": 0.1395,
+              "accuracy": 0.7225,
+              "threshold": 0.8
+            },
+            {
+              "tp": 14,
+              "fp": 34,
+              "tn": 566,
+              "fn": 186,
+              "precision": 0.2917,
+              "recall": 0.07,
+              "f1": 0.1129,
+              "accuracy": 0.725,
+              "threshold": 0.9
+            }
+          ],
+          "n_used": 800,
+          "n_unknown": 0
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 15.49,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-T1/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-T1/stderr.txt",
+        "resources": {
+          "samples": 61,
+          "duration_sec": 15.231,
+          "peak_cpu_pct": 101.6,
+          "avg_cpu_pct": 71.2,
+          "peak_rss_mb": 508.6,
+          "avg_rss_mb": 465.9,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-T1/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "M-CAL",
+      "spec": {
+        "test_id": "M-CAL",
+        "name": "Confidence calibration",
+        "target": "test_harness.ml_tests.t_calibration:run",
+        "phase": "B",
+        "severity": "MEDIUM",
+        "timeout_sec": 240,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-CAL",
+        "name": "Confidence calibration",
+        "severity": "MEDIUM",
+        "verdict": "FAIL",
+        "expected": "ECE \u2264 0.1",
+        "actual": "ECE = 0.4572 exceeds 0.1; model confidence is not well-calibrated.",
+        "csv": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-CAL/calib.csv",
+        "raw": {
+          "ece": 0.4572,
+          "n_bins": 10,
+          "n_used": 800,
+          "table": [
+            {
+              "bin_lo": 0.0,
+              "bin_hi": 0.1,
+              "count": 141,
+              "avg_conf": 0.0095,
+              "obs_rate": 0.461,
+              "abs_gap": 0.4514
+            },
+            {
+              "bin_lo": 0.1,
+              "bin_hi": 0.2,
+              "count": 12,
+              "avg_conf": 0.1489,
+              "obs_rate": 0.5,
+              "abs_gap": 0.3511
+            },
+            {
+              "bin_lo": 0.2,
+              "bin_hi": 0.3,
+              "count": 11,
+              "avg_conf": 0.2644,
+              "obs_rate": 0.6364,
+              "abs_gap": 0.3719
+            },
+            {
+              "bin_lo": 0.3,
+              "bin_hi": 0.4,
+              "count": 7,
+              "avg_conf": 0.3714,
+              "obs_rate": 0.5714,
+              "abs_gap": 0.2
+            },
+            {
+              "bin_lo": 0.4,
+              "bin_hi": 0.5,
+              "count": 11,
+              "avg_conf": 0.4456,
+              "obs_rate": 0.3636,
+              "abs_gap": 0.0819
+            },
+            {
+              "bin_lo": 0.5,
+              "bin_hi": 0.6,
+              "count": 10,
+              "avg_conf": 0.5557,
+              "obs_rate": 0.2,
+              "abs_gap": 0.3557
+            },
+            {
+              "bin_lo": 0.6,
+              "bin_hi": 0.7,
+              "count": 6,
+              "avg_conf": 0.6428,
+              "obs_rate": 0.8333,
+              "abs_gap": 0.1905
+            },
+            {
+              "bin_lo": 0.7,
+              "bin_hi": 0.8,
+              "count": 13,
+              "avg_conf": 0.753,
+              "obs_rate": 0.6154,
+              "abs_gap": 0.1376
+            },
+            {
+              "bin_lo": 0.8,
+              "bin_hi": 0.9,
+              "count": 13,
+              "avg_conf": 0.8556,
+              "obs_rate": 0.6154,
+              "abs_gap": 0.2402
+            },
+            {
+              "bin_lo": 0.9,
+              "bin_hi": 1.0,
+              "count": 576,
+              "avg_conf": 0.9946,
+              "obs_rate": 0.5052,
+              "abs_gap": 0.4894
+            }
+          ]
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 38.414,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-CAL/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/M-CAL/stderr.txt",
+        "resources": {
+          "samples": 151,
+          "duration_sec": 38.156,
+          "peak_cpu_pct": 99.9,
+          "avg_cpu_pct": 87.0,
+          "peak_rss_mb": 509.0,
+          "avg_rss_mb": 495.5,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/M-CAL/resources.csv"
+        }
+      }
+    },
+    {
+      "test_id": "ST-2b",
+      "spec": {
+        "test_id": "ST-2b",
+        "name": "End-to-end throughput (with XAI)",
+        "target": "test_harness.stress_tests.t_e2e_throughput:run",
+        "phase": "D",
+        "severity": "MEDIUM",
+        "timeout_sec": 600,
+        "kwargs": {},
+        "requires_models": true,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "ST-2b",
+        "name": "End-to-end throughput",
+        "severity": "MEDIUM",
+        "verdict": "FAIL",
+        "expected": "end-to-end \u2265 200 pps",
+        "actual": "end-to-end only 65 pps (ingest is fine at 39346 pps, but flush of 10000 flows took 153.6s = 65 flow/s). The bottleneck is flow finalisation: Stage-2 inference + per-flow XAI.",
+        "raw": {
+          "ingest_pps": 39346.3,
+          "ingest_dur_sec": 0.254,
+          "flush_dur_sec": 153.63,
+          "flushed_flows": 10000,
+          "flow_per_sec": 65.1,
+          "e2e_pps": 65.0,
+          "n_packets": 10000
+        },
+        "_ok": true
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 155.811,
+        "stdout_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/ST-2b/stdout.txt",
+        "stderr_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/logs/ST-2b/stderr.txt",
+        "resources": {
+          "samples": 608,
+          "duration_sec": 155.548,
+          "peak_cpu_pct": 99.9,
+          "avg_cpu_pct": 56.7,
+          "peak_rss_mb": 552.3,
+          "avg_rss_mb": 545.9,
+          "peak_gpu_mb": null,
+          "csv_path": "/Users/zeyadalghamdi/Downloads/botnet_detector-main/test_harness/artifacts/ST-2b/resources.csv"
+        }
+      }
+    }
+  ]
+}

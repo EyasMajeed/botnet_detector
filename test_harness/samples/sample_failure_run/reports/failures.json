@@ -1,0 +1,374 @@
+{
+  "n_failures": 9,
+  "entries": [
+    {
+      "test_id": "S1-06",
+      "spec": {
+        "test_id": "S1-06",
+        "name": "MAC-OUI spoofing",
+        "phase": "C",
+        "severity": "CRITICAL",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "S1-06",
+        "name": "MAC-OUI spoofing",
+        "severity": "CRITICAL",
+        "verdict": "FAIL",
+        "expected": "iot routing rate < 50% on workstation-cadence flows",
+        "actual": "100% of spoofed-MAC flows routed to IoT branch without behavioural verification.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 3.9,
+        "stdout_path": "logs/S1-06/stdout.txt",
+        "stderr_path": "logs/S1-06/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 1180,
+          "avg_rss_mb": 708.0
+        }
+      }
+    },
+    {
+      "test_id": "P-04",
+      "spec": {
+        "test_id": "P-04",
+        "name": "IPv6-only flows",
+        "phase": "A",
+        "severity": "HIGH",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "P-04",
+        "name": "IPv6-only flows",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "IPv6 flows produce >=1 result OR explicit log of unsupported",
+        "actual": "All IPv6 packets silently dropped: seen=180, results=0. Confirms the IPv6 blind spot.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 11.7,
+        "stdout_path": "logs/P-04/stdout.txt",
+        "stderr_path": "logs/P-04/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 412,
+          "avg_rss_mb": 247.2
+        }
+      }
+    },
+    {
+      "test_id": "P-03",
+      "spec": {
+        "test_id": "P-03",
+        "name": "VLAN-tagged frames",
+        "phase": "A",
+        "severity": "HIGH",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "P-03",
+        "name": "VLAN-tagged frames",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "\u226580% of VLAN packets reach process_packet",
+        "actual": "only 0/200 (0.0%) processed - VLAN handling likely missing",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 4.1,
+        "stdout_path": "logs/P-03/stdout.txt",
+        "stderr_path": "logs/P-03/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 380,
+          "avg_rss_mb": 228.0
+        }
+      }
+    },
+    {
+      "test_id": "M-WS",
+      "spec": {
+        "test_id": "M-WS",
+        "name": "Window starvation",
+        "phase": "B",
+        "severity": "HIGH",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-WS",
+        "name": "Window starvation",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "F1 drop \u2264 0.05 between balanced and starved",
+        "actual": "F1 drops 24.0 pp under unique-IP starvation: 0.91 \u2192 0.67; recall drops 31.0 pp.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 42.6,
+        "stdout_path": "logs/M-WS/stdout.txt",
+        "stderr_path": "logs/M-WS/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 1820,
+          "avg_rss_mb": 1092.0
+        }
+      }
+    },
+    {
+      "test_id": "SC-K",
+      "spec": {
+        "test_id": "SC-K",
+        "name": "Kitsune key explosion",
+        "phase": "C",
+        "severity": "HIGH",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "SC-K",
+        "name": "Kitsune key explosion",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "hh and hphp key counts \u2264 5000 via LRU/TTL",
+        "actual": "Kitsune state unbounded: hh=8000, hphp=8000, h=1 (cap=5000). No LRU/TTL in extractor.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 28.1,
+        "stdout_path": "logs/SC-K/stdout.txt",
+        "stderr_path": "logs/SC-K/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 2100,
+          "avg_rss_mb": 1260.0
+        }
+      }
+    },
+    {
+      "test_id": "RT-1",
+      "spec": {
+        "test_id": "RT-1",
+        "name": "Slow beaconing botnet",
+        "phase": "C",
+        "severity": "HIGH",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "RT-1",
+        "name": "Slow beaconing botnet",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "botnet detection rate \u2265 50%",
+        "actual": "botnet rate only 6.7%; slow beacons defeat 30-s flow idle.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 5.6,
+        "stdout_path": "logs/RT-1/stdout.txt",
+        "stderr_path": "logs/RT-1/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 1290,
+          "avg_rss_mb": 774.0
+        }
+      }
+    },
+    {
+      "test_id": "M-ADV",
+      "spec": {
+        "test_id": "M-ADV",
+        "name": "Scaler-aware FGSM",
+        "phase": "C",
+        "severity": "HIGH",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-ADV",
+        "name": "Scaler-aware FGSM",
+        "severity": "HIGH",
+        "verdict": "FAIL",
+        "expected": "max routing-flip rate \u2264 30% at any tested \u03b5",
+        "actual": "max flip rate 78% \u2014 Stage-1 is brittle to scaler-aware perturbations.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 33.7,
+        "stdout_path": "logs/M-ADV/stdout.txt",
+        "stderr_path": "logs/M-ADV/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 1560,
+          "avg_rss_mb": 936.0
+        }
+      }
+    },
+    {
+      "test_id": "M-CAL",
+      "spec": {
+        "test_id": "M-CAL",
+        "name": "Confidence calibration",
+        "phase": "B",
+        "severity": "MEDIUM",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "M-CAL",
+        "name": "Confidence calibration",
+        "severity": "MEDIUM",
+        "verdict": "FAIL",
+        "expected": "ECE \u2264 0.10",
+        "actual": "ECE = 0.176 exceeds 0.10; model confidence is not well-calibrated.",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 19.4,
+        "stdout_path": "logs/M-CAL/stdout.txt",
+        "stderr_path": "logs/M-CAL/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 1400,
+          "avg_rss_mb": 840.0
+        }
+      }
+    },
+    {
+      "test_id": "ST-2",
+      "spec": {
+        "test_id": "ST-2",
+        "name": "Packet flood throughput",
+        "phase": "D",
+        "severity": "MEDIUM",
+        "target": "x:y",
+        "timeout_sec": 60,
+        "kwargs": {},
+        "requires_models": false,
+        "requires_scapy": true,
+        "requires_xai": false,
+        "requires_qt": false,
+        "monitor_resources": true,
+        "notes": ""
+      },
+      "result": {
+        "test_id": "ST-2",
+        "name": "Packet flood throughput",
+        "severity": "MEDIUM",
+        "verdict": "FAIL",
+        "expected": "\u2265 1000 pps",
+        "actual": "10000 packets in 14.20s = 704 pps",
+        "raw": {}
+      },
+      "isolated": {
+        "return_code": 0,
+        "timed_out": false,
+        "crashed": false,
+        "duration_sec": 14.5,
+        "stdout_path": "logs/ST-2/stdout.txt",
+        "stderr_path": "logs/ST-2/stderr.txt",
+        "resources": {
+          "peak_cpu_pct": 65,
+          "avg_cpu_pct": 32,
+          "peak_rss_mb": 1380,
+          "avg_rss_mb": 828.0
+        }
+      }
+    }
+  ]
+}

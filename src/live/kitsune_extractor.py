@@ -6,6 +6,11 @@
  Implements the Kitsune incremental statistics engine that produces
  the exact 115 features used to train the N-BaIoT CNN-LSTM model.
 
+ PATCHED (Bug SC-K): all internal stream dicts are LRU-bounded so state
+ cannot grow without limit on long captures or scan traffic.
+ See LRUDefaultDict and MAX_STREAMS_PER_DICT below. The constructor
+ still works with no arguments — every existing call site is unchanged.
+
  Reference:
    Mirsky et al. (2018) "Kitsune: An Ensemble of Autoencoders for
    Online Network Intrusion Detection", NDSS Symposium.
@@ -28,76 +33,134 @@
    (These are decay factors, not seconds. Higher lambda = faster decay
     = shorter effective history. L5 ≈ 100ms, L0.01 ≈ 1min.)
 
-   Each window tracks an IncStat (1D) or IncStatCov (2D) object that
-   updates incrementally on each new packet using the damped formula:
-     new_weight = old_weight * w + 1
-     new_mean   = old_mean   * w + value * (1-w)    (approximate)
-   where w = e^(-lambda * elapsed_time)
-
    Per-packet output: 115 float values in the exact column order
    matching N-BaIoT training data.
 
  USAGE:
    from src.live.kitsune_extractor import KitsuneExtractor
    ext = KitsuneExtractor()
-
-   # Call once per packet:
-   features = ext.update(
-       timestamp  = pkt_time,       # float, epoch seconds
-       src_mac    = "aa:bb:cc:...", # string
-       src_ip     = "192.168.1.5",
-       dst_ip     = "8.8.8.8",
-       src_port   = 54321,
-       dst_port   = 443,
-       pkt_len    = 84,             # total packet length in bytes
-       protocol   = "TCP"
-   )
-   # features is a numpy array of shape (115,) ready for the CNN-LSTM
+   features = ext.update(timestamp=..., src_mac=..., src_ip=...,
+                          dst_ip=..., src_port=..., dst_port=...,
+                          pkt_len=..., protocol="TCP")
+   # features is a numpy array of shape (115,)
 ════════════════════════════════════════════════════════════════════════
 """
 from __future__ import annotations
 import math
+from collections import OrderedDict
+from typing import Any, Callable
+
 import numpy as np
-from collections import defaultdict
 
 
 # ── Exact column order matching N-BaIoT training data ─────────────────
 FEATURE_NAMES: list[str] = [
     # MI  (src_MAC+src_IP → 5 windows × 3 stats = 15)
-    "MI_dir_L5_weight",  "MI_dir_L5_mean",  "MI_dir_L5_variance",
-    "MI_dir_L3_weight",  "MI_dir_L3_mean",  "MI_dir_L3_variance",
-    "MI_dir_L1_weight",  "MI_dir_L1_mean",  "MI_dir_L1_variance",
-    "MI_dir_L0.1_weight","MI_dir_L0.1_mean","MI_dir_L0.1_variance",
+    "MI_dir_L5_weight",   "MI_dir_L5_mean",   "MI_dir_L5_variance",
+    "MI_dir_L3_weight",   "MI_dir_L3_mean",   "MI_dir_L3_variance",
+    "MI_dir_L1_weight",   "MI_dir_L1_mean",   "MI_dir_L1_variance",
+    "MI_dir_L0.1_weight", "MI_dir_L0.1_mean", "MI_dir_L0.1_variance",
     "MI_dir_L0.01_weight","MI_dir_L0.01_mean","MI_dir_L0.01_variance",
     # H   (src_IP → 5 windows × 3 stats = 15)
-    "H_L5_weight",  "H_L5_mean",  "H_L5_variance",
-    "H_L3_weight",  "H_L3_mean",  "H_L3_variance",
-    "H_L1_weight",  "H_L1_mean",  "H_L1_variance",
-    "H_L0.1_weight","H_L0.1_mean","H_L0.1_variance",
+    "H_L5_weight",   "H_L5_mean",   "H_L5_variance",
+    "H_L3_weight",   "H_L3_mean",   "H_L3_variance",
+    "H_L1_weight",   "H_L1_mean",   "H_L1_variance",
+    "H_L0.1_weight", "H_L0.1_mean", "H_L0.1_variance",
     "H_L0.01_weight","H_L0.01_mean","H_L0.01_variance",
     # HH  (src_IP→dst_IP → 5 windows × 7 stats = 35)
-    "HH_L5_weight",  "HH_L5_mean",  "HH_L5_std",  "HH_L5_magnitude",  "HH_L5_radius",  "HH_L5_covariance",  "HH_L5_pcc",
-    "HH_L3_weight",  "HH_L3_mean",  "HH_L3_std",  "HH_L3_magnitude",  "HH_L3_radius",  "HH_L3_covariance",  "HH_L3_pcc",
-    "HH_L1_weight",  "HH_L1_mean",  "HH_L1_std",  "HH_L1_magnitude",  "HH_L1_radius",  "HH_L1_covariance",  "HH_L1_pcc",
-    "HH_L0.1_weight","HH_L0.1_mean","HH_L0.1_std","HH_L0.1_magnitude","HH_L0.1_radius","HH_L0.1_covariance","HH_L0.1_pcc",
+    "HH_L5_weight",   "HH_L5_mean",   "HH_L5_std",   "HH_L5_magnitude",   "HH_L5_radius",   "HH_L5_covariance",   "HH_L5_pcc",
+    "HH_L3_weight",   "HH_L3_mean",   "HH_L3_std",   "HH_L3_magnitude",   "HH_L3_radius",   "HH_L3_covariance",   "HH_L3_pcc",
+    "HH_L1_weight",   "HH_L1_mean",   "HH_L1_std",   "HH_L1_magnitude",   "HH_L1_radius",   "HH_L1_covariance",   "HH_L1_pcc",
+    "HH_L0.1_weight", "HH_L0.1_mean", "HH_L0.1_std", "HH_L0.1_magnitude", "HH_L0.1_radius", "HH_L0.1_covariance", "HH_L0.1_pcc",
     "HH_L0.01_weight","HH_L0.01_mean","HH_L0.01_std","HH_L0.01_magnitude","HH_L0.01_radius","HH_L0.01_covariance","HH_L0.01_pcc",
     # HH_jit (src_IP→dst_IP jitter → 5 windows × 3 stats = 15)
-    "HH_jit_L5_weight",  "HH_jit_L5_mean",  "HH_jit_L5_variance",
-    "HH_jit_L3_weight",  "HH_jit_L3_mean",  "HH_jit_L3_variance",
-    "HH_jit_L1_weight",  "HH_jit_L1_mean",  "HH_jit_L1_variance",
-    "HH_jit_L0.1_weight","HH_jit_L0.1_mean","HH_jit_L0.1_variance",
+    "HH_jit_L5_weight",   "HH_jit_L5_mean",   "HH_jit_L5_variance",
+    "HH_jit_L3_weight",   "HH_jit_L3_mean",   "HH_jit_L3_variance",
+    "HH_jit_L1_weight",   "HH_jit_L1_mean",   "HH_jit_L1_variance",
+    "HH_jit_L0.1_weight", "HH_jit_L0.1_mean", "HH_jit_L0.1_variance",
     "HH_jit_L0.01_weight","HH_jit_L0.01_mean","HH_jit_L0.01_variance",
     # HpHp (src_ip:port→dst_ip:port → 5 windows × 7 stats = 35)
-    "HpHp_L5_weight",  "HpHp_L5_mean",  "HpHp_L5_std",  "HpHp_L5_magnitude",  "HpHp_L5_radius",  "HpHp_L5_covariance",  "HpHp_L5_pcc",
-    "HpHp_L3_weight",  "HpHp_L3_mean",  "HpHp_L3_std",  "HpHp_L3_magnitude",  "HpHp_L3_radius",  "HpHp_L3_covariance",  "HpHp_L3_pcc",
-    "HpHp_L1_weight",  "HpHp_L1_mean",  "HpHp_L1_std",  "HpHp_L1_magnitude",  "HpHp_L1_radius",  "HpHp_L1_covariance",  "HpHp_L1_pcc",
-    "HpHp_L0.1_weight","HpHp_L0.1_mean","HpHp_L0.1_std","HpHp_L0.1_magnitude","HpHp_L0.1_radius","HpHp_L0.1_covariance","HpHp_L0.1_pcc",
+    "HpHp_L5_weight",   "HpHp_L5_mean",   "HpHp_L5_std",   "HpHp_L5_magnitude",   "HpHp_L5_radius",   "HpHp_L5_covariance",   "HpHp_L5_pcc",
+    "HpHp_L3_weight",   "HpHp_L3_mean",   "HpHp_L3_std",   "HpHp_L3_magnitude",   "HpHp_L3_radius",   "HpHp_L3_covariance",   "HpHp_L3_pcc",
+    "HpHp_L1_weight",   "HpHp_L1_mean",   "HpHp_L1_std",   "HpHp_L1_magnitude",   "HpHp_L1_radius",   "HpHp_L1_covariance",   "HpHp_L1_pcc",
+    "HpHp_L0.1_weight", "HpHp_L0.1_mean", "HpHp_L0.1_std", "HpHp_L0.1_magnitude", "HpHp_L0.1_radius", "HpHp_L0.1_covariance", "HpHp_L0.1_pcc",
     "HpHp_L0.01_weight","HpHp_L0.01_mean","HpHp_L0.01_std","HpHp_L0.01_magnitude","HpHp_L0.01_radius","HpHp_L0.01_covariance","HpHp_L0.01_pcc",
 ]
 assert len(FEATURE_NAMES) == 115, f"Expected 115 features, got {len(FEATURE_NAMES)}"
 
 # Decay lambdas — same values used in N-BaIoT paper
 LAMBDAS = [5.0, 3.0, 1.0, 0.1, 0.01]
+
+
+# ════════════════════════════════════════════════════════════════════════
+# LRU-BOUNDED DEFAULTDICT — caps Kitsune state under traffic cardinality
+# ════════════════════════════════════════════════════════════════════════
+# Why this exists (Bug SC-K):
+#   On a network scan or long-running capture, the per-stream dicts grow
+#   linearly with the number of unique source/destination tuples. An
+#   8 000-host scan creates 8 000 entries in _hh and _hphp; a long capture
+#   accumulates entries from every IP the network has ever talked to.
+#
+#   We bound each dict at MAX_STREAMS_PER_DICT entries with strict LRU
+#   eviction. Eviction is safe by design: an evicted stream's
+#   exponentially-damped stats have already decayed during its idle
+#   period, so re-creating it on next contact loses negligible
+#   information.
+#
+# Cap selection:
+#   10 000 streams × 5 dicts × ~75 floats × 4 bytes ≈ 15 MB worst case.
+#   Larger than any realistic IoT/SOHO network; smaller than any modern
+#   server's memory budget. Override via KitsuneExtractor(max_streams=N).
+
+MAX_STREAMS_PER_DICT = 10_000
+
+
+class LRUDefaultDict(OrderedDict):
+    """
+    A defaultdict that also enforces an LRU size cap.
+
+    Behaves like collections.defaultdict(default_factory) for misses and
+    like an OrderedDict-based LRU for size management.
+
+    Eviction policy:
+      - On __setitem__ that pushes size over `maxsize`, the oldest entry
+        (least-recently inserted/touched) is dropped.
+      - On __getitem__ hits, the entry is moved to the most-recent end.
+      - On __getitem__ misses, the default_factory is invoked and the
+        new entry is inserted at the most-recent end (and may evict).
+
+    Drop-in replacement for collections.defaultdict in this module —
+    every existing call site (`self._hh[hh_key]` etc.) still works.
+    """
+    __slots__ = ("default_factory", "maxsize")
+
+    def __init__(self,
+                 default_factory: Callable[[], Any],
+                 maxsize: int = MAX_STREAMS_PER_DICT) -> None:
+        super().__init__()
+        self.default_factory = default_factory
+        self.maxsize         = maxsize
+
+    def __getitem__(self, key):
+        if key in self:
+            # Hit: refresh recency.
+            self.move_to_end(key)
+            return super().__getitem__(key)
+        # Miss: create with default_factory and insert (may evict).
+        value = self.default_factory()
+        self[key] = value           # routes through __setitem__ → eviction
+        return value
+
+    def __setitem__(self, key, value):
+        if key in self:
+            # Updating an existing key — preserve recency semantics.
+            super().__setitem__(key, value)
+            self.move_to_end(key)
+            return
+        super().__setitem__(key, value)
+        # Evict oldest if over cap.
+        while len(self) > self.maxsize:
+            self.popitem(last=False)
 
 
 # ════════════════════════════════════════════════════════════════════════
@@ -113,7 +176,7 @@ class IncStat1D:
       w    = e^(-lambda * dt)   (decay factor)
       weight_new = weight * w + 1
       mean_new   = (mean * weight * w + value) / weight_new
-      var_new    = (var + (mean-value)^2 * weight*w/(weight_new)) * ...
+      var_new    = (var + (mean-value)^2 * weight*w/(weight_new)) * w
     """
     __slots__ = ("lam", "weight", "mean", "var", "last_time")
 
@@ -197,6 +260,7 @@ class IncStat2D:
     def get(self) -> tuple[float, float, float, float, float, float, float]:
         """
         Returns (weight, mean1, std1, magnitude, radius, covariance, pcc).
+
         magnitude = sqrt(mean1^2 + mean2^2)
         radius    = sqrt(var1 + var2)
         covariance = cov_sum / weight  (approx)
@@ -232,27 +296,39 @@ class KitsuneExtractor:
     One extractor instance should be maintained for the lifetime of the
     capture session — it accumulates stream history across all packets.
 
-    Memory: O(unique_streams × 5_lambdas) — grows with unique IP pairs.
-    For a typical home/office network (~50 devices) this is negligible.
+    PATCHED (SC-K): all internal stream dicts are LRU-bounded.
+    Memory is now O(min(n_streams_seen, max_streams) × 5_lambdas × stat_state).
     """
 
-    def __init__(self):
-        # Each key maps to a list of 5 stat objects (one per lambda)
+    def __init__(self, max_streams: int = MAX_STREAMS_PER_DICT):
+        """
+        Parameters
+        ----------
+        max_streams : int
+            Per-dict LRU cap. Each of the 5 stream dicts is independently
+            capped at this value. With the default 10 000, peak memory is
+            roughly 15 MB — well under any reasonable budget.
+        """
+        # Each key maps to a list of 5 stat objects (one per lambda).
         # MI, H: list of IncStat1D
         # HH, HH_jit, HpHp: list of IncStat2D
-        self._mi    : dict[str, list[IncStat1D]]  = defaultdict(
-            lambda: [IncStat1D(l) for l in LAMBDAS])
-        self._h     : dict[str, list[IncStat1D]]  = defaultdict(
-            lambda: [IncStat1D(l) for l in LAMBDAS])
-        self._hh    : dict[str, list[IncStat2D]]  = defaultdict(
-            lambda: [IncStat2D(l) for l in LAMBDAS])
-        self._hhjit : dict[str, list[IncStat2D]]  = defaultdict(
-            lambda: [IncStat2D(l) for l in LAMBDAS])
-        self._hphp  : dict[str, list[IncStat2D]]  = defaultdict(
-            lambda: [IncStat2D(l) for l in LAMBDAS])
+        self._mi    : LRUDefaultDict = LRUDefaultDict(
+            lambda: [IncStat1D(l) for l in LAMBDAS], maxsize=max_streams)
+        self._h     : LRUDefaultDict = LRUDefaultDict(
+            lambda: [IncStat1D(l) for l in LAMBDAS], maxsize=max_streams)
+        self._hh    : LRUDefaultDict = LRUDefaultDict(
+            lambda: [IncStat2D(l) for l in LAMBDAS], maxsize=max_streams)
+        self._hhjit : LRUDefaultDict = LRUDefaultDict(
+            lambda: [IncStat2D(l) for l in LAMBDAS], maxsize=max_streams)
+        self._hphp  : LRUDefaultDict = LRUDefaultDict(
+            lambda: [IncStat2D(l) for l in LAMBDAS], maxsize=max_streams)
 
-        # Last packet time per HH key (for jitter computation)
-        self._last_hh_time: dict[str, float] = {}
+        # Last packet time per HH key (for jitter computation).
+        # Bounded with the same LRU policy so it can't outgrow self._hh.
+        self._last_hh_time: LRUDefaultDict = LRUDefaultDict(
+            lambda: 0.0, maxsize=max_streams)
+
+        self._max_streams = max_streams
 
     def update(self,
                timestamp : float,
@@ -355,6 +431,18 @@ class KitsuneExtractor:
 
     @property
     def n_streams(self) -> int:
-        """Total number of unique streams currently tracked."""
+        """Total number of unique streams currently tracked across all 5 dicts."""
         return (len(self._mi) + len(self._h) +
                 len(self._hh) + len(self._hhjit) + len(self._hphp))
+
+    @property
+    def stream_counts(self) -> dict:
+        """Per-dict stream counts. Useful for spotting which dict caps out first."""
+        return {
+            "mi":    len(self._mi),
+            "h":     len(self._h),
+            "hh":    len(self._hh),
+            "hhjit": len(self._hhjit),
+            "hphp":  len(self._hphp),
+            "max":   self._max_streams,
+        }

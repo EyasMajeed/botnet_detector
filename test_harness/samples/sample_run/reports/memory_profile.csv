@@ -1,0 +1,14 @@
+test_id,phase,verdict,peak_rss_mb,avg_rss_mb,samples,duration_sec,resources_csv
+M-00,A,PASS,8.7,8.7,1,0.022,/home/claude/test_harness/artifacts/M-00/resources.csv
+F-01,A,PASS,4.9,4.9,1,0.0,/home/claude/test_harness/artifacts/F-01/resources.csv
+F-02,A,PASS,5.6,5.6,1,0.001,/home/claude/test_harness/artifacts/F-02/resources.csv
+F-03,A,PASS,78.7,34.3,29,7.018,/home/claude/test_harness/artifacts/F-03/resources.csv
+F-04,A,PASS,0.6,0.6,1,0.0,/home/claude/test_harness/artifacts/F-04/resources.csv
+F-05,A,PASS,4.4,4.4,1,0.0,/home/claude/test_harness/artifacts/F-05/resources.csv
+F-07,A,PASS,5.1,5.1,1,0.0,/home/claude/test_harness/artifacts/F-07/resources.csv
+F-08,A,PASS,0.8,0.4,2,0.251,/home/claude/test_harness/artifacts/F-08/resources.csv
+F-09,A,PASS,2.8,2.8,1,0.0,/home/claude/test_harness/artifacts/F-09/resources.csv
+P-02,A,SKIPPED,,,,,
+P-03,A,SKIPPED,,,,,
+P-04,A,SKIPPED,,,,,
+P-07,A,SKIPPED,,,,,

@@ -1,0 +1,17 @@
+test_id,name,phase,severity,verdict,duration_sec,peak_cpu_pct,avg_cpu_pct,peak_rss_mb,avg_rss_mb,peak_gpu_mb,timed_out,return_code
+M-00,Schema drift,A,CRITICAL,PASS,0.4,65,32,9,5.3999999999999995,,False,0
+F-08,Parser fuzzing,A,MEDIUM,PASS,0.6,65,32,4,2.4,,False,0
+P-04,IPv6-only flows,A,HIGH,FAIL,11.7,65,32,412,247.2,,False,0
+P-03,VLAN-tagged frames,A,HIGH,FAIL,4.1,65,32,380,228.0,,False,0
+P-07,Backwards timestamps,A,HIGH,PASS,6.8,65,32,410,246.0,,False,0
+M-EF,Empty-flow regression,B,HIGH,PASS,8.2,65,32,1320,792.0,,False,0
+M-WS,Window starvation,B,HIGH,FAIL,42.6,65,32,1820,1092.0,,False,0
+M-CAL,Confidence calibration,B,MEDIUM,FAIL,19.4,65,32,1400,840.0,,False,0
+S1-06,MAC-OUI spoofing,C,CRITICAL,FAIL,3.9,65,32,1180,708.0,,False,0
+SC-K,Kitsune key explosion,C,HIGH,FAIL,28.1,65,32,2100,1260.0,,False,0
+RT-1,Slow beaconing botnet,C,HIGH,FAIL,5.6,65,32,1290,774.0,,False,0
+M-ADV,Scaler-aware FGSM,C,HIGH,FAIL,33.7,65,32,1560,936.0,,False,0
+X-A1,XAI sanity battery,C,HIGH,PASS,27.3,65,32,1610,966.0,,False,0
+G-DS,DetectionStore behaviour,D,MEDIUM,PASS,1.2,65,32,290,174.0,,False,0
+G-RU,Repeated upload cycles,D,MEDIUM,PASS,41.0,65,32,1460,876.0,,False,0
+ST-2,Packet flood throughput,D,MEDIUM,FAIL,14.5,65,32,1380,828.0,,False,0
