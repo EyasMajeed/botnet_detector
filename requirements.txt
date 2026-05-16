@@ -1,0 +1,117 @@
+# =============================================================================
+#  AI-Based Botnet Detection Using Hybrid Deep Learning Models
+#  Group 07  |  CPCS498 / CPCS499  |  Graduation Project
+# -----------------------------------------------------------------------------
+#  Top-level project dependencies.
+#  Test-harness extras live in test_harness/requirements.txt (do NOT duplicate).
+#
+#  Python : 3.10 or newer  (code uses PEP-604 unions, `list[str]`, etc.)
+#  OS     : Windows 10/11 and macOS 12+ (Intel + Apple Silicon) verified
+#
+#  Install (from the project root):
+#      Windows :  pip  install -r requirements.txt
+#      macOS   :  pip3 install -r requirements.txt
+# =============================================================================
+
+
+# -----------------------------------------------------------------------------
+# 1. Core scientific stack
+#    Used everywhere: data_processing/, models/stage1/, models/stage2/,
+#    monitoring.py, src/xai/, evaluation/.
+# -----------------------------------------------------------------------------
+numpy>=1.24,<3.0
+pandas>=2.0
+scikit-learn>=1.3
+tqdm>=4.65
+
+
+# -----------------------------------------------------------------------------
+# 2. Deep learning  (Stage-2 CNN-LSTMs + Integrated Gradients for XAI)
+#    Pinned >=2.0 because monitoring.py and src/xai/local_explainer.py rely on
+#    torch.autograd.grad batching semantics that landed in 2.x. CPU wheels are
+#    sufficient for inference; install a CUDA build manually if you have a GPU.
+# -----------------------------------------------------------------------------
+torch>=2.0
+
+
+# -----------------------------------------------------------------------------
+# 3. Plotting
+#    Used by Stage-1 classifier.py (RF confusion matrix, feature importance),
+#    every ablation script under evaluation/, and src/xai/global_importance.py.
+#    All scripts set matplotlib.use("Agg") for headless rendering.
+# -----------------------------------------------------------------------------
+matplotlib>=3.7
+
+
+# -----------------------------------------------------------------------------
+# 4. Live capture and PCAP handling
+#    scapy: app/live_capture.py, app/monitor_bridge.py, monitoring.py.
+#    Note: requires root/admin to actually sniff; demo mode runs without it.
+#    Note: `tshark` (the Wireshark CLI) is ALSO required for
+#          data_processing/pcap_to_csv.py — it is NOT a pip package.
+#          Install it separately:
+#              Windows : choco install wireshark  (or download Wireshark MSI)
+#              macOS   : brew install wireshark
+# -----------------------------------------------------------------------------
+scapy>=2.5.0
+
+
+# -----------------------------------------------------------------------------
+# 5. Desktop GUI  (PyQt6)
+#    Used by app/mockApp.py, app/live_capture.py, app/monitor_bridge.py.
+#    If you only intend to train models / run the CLI pipeline, you can skip
+#    this dependency — none of the data_processing/ or models/ scripts import
+#    PyQt6.
+# -----------------------------------------------------------------------------
+PyQt6>=6.5
+
+
+# -----------------------------------------------------------------------------
+# 6. PDF reporting
+#    Used exclusively by app/report_generator.py to produce the
+#    analyst-facing PDF security report from a session's DetectionResults.
+# -----------------------------------------------------------------------------
+reportlab>=4.0
+
+
+# =============================================================================
+#  OPTIONAL — the project degrades gracefully if any of these are missing.
+#  Comment out anything you do not need. The codebase wraps these imports in
+#  try/except blocks and logs a clear warning when absent.
+# =============================================================================
+
+# -----------------------------------------------------------------------------
+# 7. XGBoost — baseline Stage-1 classifier (comparison only).
+#    models/stage1/classifier.py guards the import (`HAS_XGB`) and skips the
+#    XGBoost baseline training if absent. Random Forest remains the production
+#    Stage-1 model on both Windows and macOS — XGBoost is kept for the
+#    side-by-side comparison documented in Stage1_Chapter §5.
+#    macOS NOTE: see Stage1_Chapter §5.4 — Apple Silicon may segfault on
+#    XGBoost JSON load_model(). If you hit this, leave xgboost installed for
+#    training on Windows and rely on the RF .pkl artifact at inference time.
+# -----------------------------------------------------------------------------
+xgboost>=1.7
+
+# -----------------------------------------------------------------------------
+# 8. SHAP — Stage-1 explainer (TreeExplainer on the trained Random Forest).
+#    src/xai/local_explainer.py wraps the import in try/except and disables
+#    Stage1Explainer with a warning if absent; Stage-2 IG explainers continue
+#    to work. Required for XAI Chapter §3.2 and global_importance.py SHAP path.
+# -----------------------------------------------------------------------------
+shap>=0.43
+
+# -----------------------------------------------------------------------------
+# 9. dpkt — only used by data_processing/pcap_to_csv.py::generate_sample_pcap()
+#    for synthesising a small test PCAP when no real dataset is on disk.
+#    Imported lazily inside that function — safe to omit in production.
+# -----------------------------------------------------------------------------
+dpkt>=1.9
+
+# -----------------------------------------------------------------------------
+# 10. Test-harness extras  (only needed if you run the QA harness).
+#     psutil  : process / resource monitoring in test_harness/utils/.
+#     pynvml  : NVIDIA GPU memory sampling — Linux/Windows only, NVIDIA-only.
+#     If you are not running test_harness/, you can omit both.
+# -----------------------------------------------------------------------------
+psutil>=5.9
+# pynvml>=11.5    # uncomment only on a machine with an NVIDIA GPU
