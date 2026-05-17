@@ -528,7 +528,7 @@ See `test_harness/README.md` for the per-test contract and CI recipe.
 | Omar Alsiary | 2236983 | — |
 | Zeyad Alghamdi | 2237000 | — |
 
-**Supervisor:** Dr. Wajdi Aljedaibi
+**Supervisor:** Dr. Abdulaziz Alnori
 
 Course: **CPCS498 — Graduation Project I** (System Design, completed),
 **CPCS499 — Graduation Project II** (Implementation, in progress).
