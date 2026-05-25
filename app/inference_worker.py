@@ -130,6 +130,21 @@ class PcapInferenceThread(QThread):
         """Request cancellation. The run loop checks this every PROGRESS_EVERY pkts."""
         self._cancelled = True
 
+    def set_xai_enabled(self, enabled: bool) -> bool:
+        """
+        Proxy to BotnetMonitor.set_xai_enabled. Lets the GUI flip XAI on/off
+        mid-PCAP-run. Returns True if applied, False if the monitor hasn't
+        been constructed yet (call ensure_monitor() first).
+        """
+        if self._monitor is None:
+            return False
+        try:
+            self._monitor.set_xai_enabled(bool(enabled))
+            return True
+        except Exception as e:
+            self._init_error = f"set_xai_enabled failed: {e!r}"
+            return False
+
     # ── QThread entry ──────────────────────────────────────────────────────
     def run(self) -> None:
         if self._monitor is None:

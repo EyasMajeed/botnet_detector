@@ -1,0 +1,17 @@
+{
+  "test_id": "F-07",
+  "name": "UTF-16 CSV",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "validator flagged or rejected: {'is_valid': True, 'format': 'FileFormat.CSV_GENERIC', 'error': '', 'size_mb': 0.02, 'row_count': 99}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-07/utf16.csv",
+  "raw": {
+    "is_valid": true,
+    "format": "FileFormat.CSV_GENERIC",
+    "error": "",
+    "size_mb": 0.02,
+    "row_count": 99
+  },
+  "_ok": true
+}

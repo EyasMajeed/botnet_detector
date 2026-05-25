@@ -1,0 +1,13 @@
+{
+  "test_id": "F-08",
+  "name": "Parser fuzzing",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "32/32 fuzz inputs handled cleanly",
+  "pcap": null,
+  "raw": {
+    "n_iters": 32
+  },
+  "_ok": true
+}

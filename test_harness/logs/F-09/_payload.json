@@ -1,0 +1,1 @@
+{"test_id": "F-09", "target": "test_harness.parsers.t_file_handler_safety:t_zip_bomb", "kwargs": {}, "result_path": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/logs/F-09/_target_result.json"}

@@ -1,0 +1,36 @@
+{
+  "test_id": "G-RU",
+  "name": "Repeated upload cycles",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "RSS slope \u2264 5 MB/iter",
+  "actual": "RSS slope 0.04 MB/iter post-warmup (samples: [383.4, 384.0, 384.0, 384.0, 384.3, 384.3, 384.3, 384.3, 384.3, 384.3])",
+  "raw": {
+    "samples_mb": [
+      383.4,
+      384.0,
+      384.0,
+      384.0,
+      384.3,
+      384.3,
+      384.3,
+      384.3,
+      384.3,
+      384.3
+    ],
+    "slope_mb_per_iter": 0.044,
+    "n_results_per_iter": [
+      150,
+      150,
+      150,
+      150,
+      150,
+      150,
+      150,
+      150,
+      150,
+      150
+    ]
+  },
+  "_ok": true
+}

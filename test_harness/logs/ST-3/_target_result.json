@@ -1,0 +1,14 @@
+{
+  "test_id": "ST-3",
+  "name": "Long-duration monitoring",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "runs cleanly for 30.0s",
+  "actual": "16 iterations, 33600 packets processed",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/ST-3/long_run.pcap",
+  "raw": {
+    "iterations": 16,
+    "total_packets_processed": 33600
+  },
+  "_ok": true
+}

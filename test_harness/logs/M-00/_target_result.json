@@ -1,0 +1,9 @@
+{
+  "test_id": "M-00",
+  "name": "Schema drift",
+  "severity": "CRITICAL",
+  "verdict": "PASS",
+  "expected": "feature lists identical",
+  "actual": "both lists have 56 features in same order",
+  "_ok": true
+}

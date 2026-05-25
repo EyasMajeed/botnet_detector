@@ -1,0 +1,30 @@
+{
+  "test_id": "SE-A",
+  "name": "SYN flood",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "scorer score>=2 AND replay processes >=50% of packets",
+  "actual": "scorer.score=7, trigger_sniff=True; replay processed 5000 packets",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/SE-A/syn_flood.pcap",
+  "raw": {
+    "suspicion": {
+      "available": true,
+      "score": 7,
+      "trigger_sniff": true,
+      "reasons": [
+        "High packet rate (10000 pkt/s > 500)",
+        "SYN without ACK (possible SYN flood / half-open scan)",
+        "Risky port used (23)",
+        "Large bytes (300,000) in short duration (0.50s)"
+      ]
+    },
+    "replay": {
+      "skipped": false,
+      "n_packets_seen": 5000,
+      "n_packets_processed": 5000,
+      "n_results": 4893,
+      "errors": []
+    }
+  },
+  "_ok": true
+}

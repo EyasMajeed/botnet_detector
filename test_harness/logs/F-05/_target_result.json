@@ -1,0 +1,17 @@
+{
+  "test_id": "F-05",
+  "name": "PCAP renamed .csv",
+  "severity": "LOW",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "magic-byte detection wins over extension: {'is_valid': True, 'format': 'FileFormat.PCAP', 'error': '', 'size_mb': 0.0, 'row_count': None}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-05/src_renamed.csv",
+  "raw": {
+    "is_valid": true,
+    "format": "FileFormat.PCAP",
+    "error": "",
+    "size_mb": 0.0,
+    "row_count": null
+  },
+  "_ok": true
+}

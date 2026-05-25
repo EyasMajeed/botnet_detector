@@ -1,0 +1,19 @@
+{
+  "test_id": "SC-K",
+  "name": "Kitsune key explosion",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "hh and hphp counts \u2264 10000 via LRU/TTL",
+  "actual": "hh=10000, hphp=10000, h=1 \u2014 bounded under cap=10000 after 12000 unique destinations (eviction active)",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/SC-K/kitsune_keys.pcap",
+  "raw": {
+    "hh": 10000,
+    "hphp": 10000,
+    "h": 1,
+    "cap_detected_from_extractor": 10000,
+    "cap_used": 10000,
+    "n_destinations": 12000,
+    "replay_packets_processed": 12000
+  },
+  "_ok": true
+}

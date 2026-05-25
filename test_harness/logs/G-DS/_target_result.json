@@ -1,0 +1,15 @@
+{
+  "test_id": "G-DS",
+  "name": "DetectionStore behaviour",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "size \u2264 50000; relabel_with_threshold callable",
+  "actual": "size=50000 (cap=50000); relabel: changed_at_high=7143, changed_at_zero=50000",
+  "raw": {
+    "n_inserted": 60000,
+    "size": 50000,
+    "cap": 50000,
+    "relabel": "changed_at_high=7143, changed_at_zero=50000"
+  },
+  "_ok": true
+}

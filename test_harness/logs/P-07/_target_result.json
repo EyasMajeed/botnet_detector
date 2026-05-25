@@ -1,0 +1,14 @@
+{
+  "test_id": "P-07",
+  "name": "Backwards timestamps",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "No NaN/Inf/negative IATs; no per-packet errors",
+  "actual": "500 flows produced; no anomalies",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/P-07/ts_reversed.pcap",
+  "raw": {
+    "errors_sample": [],
+    "n_results": 500
+  },
+  "_ok": true
+}

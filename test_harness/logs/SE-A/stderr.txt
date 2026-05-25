@@ -1,0 +1,3 @@
+[xai] Stage1Explainer disabled: ImportError: Stage1Explainer requires the `shap` package.
+Install with: pip install shap
+(Stage2 explainers work without shap — only Stage-1 needs it.)

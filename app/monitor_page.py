@@ -140,6 +140,13 @@ class MonitorPage(QWidget):
         self._alert_count  = 0
         self._sniff_count  = 0
         self._last_latency = 0.0
+        # XAI overhead tracking for the latency A/B experiment. Set per flow
+        # from monitor_bridge's _xai_latency_ms field; cumulative average is
+        # what we display so a single rate-limit-skipped flow doesn't flap
+        # the footer reading back to 0 ms.
+        self._last_xai_latency = 0.0
+        self._xai_lat_sum      = 0.0
+        self._xai_lat_count    = 0
 
         # Core components (not started yet)
         self._scorer       = SuspicionScorer()
@@ -316,10 +323,24 @@ class MonitorPage(QWidget):
                 self._on_error(getattr(self._thread, "_init_error",
                                        "BotnetMonitor init failed"))
                 return
+            # Push the current XAI toggle into the freshly-built monitor —
+            # otherwise BotnetMonitor would always start with its default
+            # (enabled), ignoring the user's Settings choice across Start/Stop.
+            if (self.settings is not None
+                    and hasattr(self._thread, "set_xai_enabled")):
+                try:
+                    self._thread.set_xai_enabled(self.settings.xai_enabled)
+                except Exception as e:
+                    print(f"[monitor_page] set_xai_enabled failed: {e!r}")
 
         self._running = True
         self._t0      = datetime.now()
         self._scorer.reset_baseline()
+        # Reset XAI overhead counters so the footer reflects this session
+        # only — otherwise a Start/Stop cycle would carry over stale stats.
+        self._last_xai_latency = 0.0
+        self._xai_lat_sum      = 0.0
+        self._xai_lat_count    = 0
         self._thread.start()
         self._uptime_timer.start(1000)
         self._tog_btn.setText("Pause")
@@ -419,6 +440,13 @@ class MonitorPage(QWidget):
             # back to "unknown" so the UI doesn't display invented routing data.
             device     = flow.get("_device_type", "unknown")
             self._last_latency = float(flow.get("_latency_ms", 0.0))
+            # Pull XAI overhead per flow. Skipped flows (rate-limited, benign,
+            # toggle off) carry 0.0 — those don't pollute the running average.
+            xai_lat = float(flow.get("_xai_latency_ms", 0.0))
+            if xai_lat > 0.0:
+                self._last_xai_latency = xai_lat
+                self._xai_lat_sum   += xai_lat
+                self._xai_lat_count += 1
             # Real suspicion (float, scale 0.0..~9.5, threshold 3.0) from the
             # monitor's suspicion_scoring(). Keep precision — don't truncate.
             # Fall back to the GUI scorer (integer scale 0..N+) only for the
@@ -489,6 +517,10 @@ class MonitorPage(QWidget):
                     s1_confidence = float(flow.get("_s1_confidence", 0.0)),
                     suspicion     = float(flow.get("_suspicion", score)),
                     latency_ms    = self._last_latency,
+                    # XAI overhead — set by monitor_bridge for every flow.
+                    # 0.0 when XAI was skipped/disabled. Persisted for
+                    # offline analysis of the latency A/B experiment.
+                    xai_latency_ms = float(flow.get("_xai_latency_ms", 0.0)),
                     alerted       = bool(flow.get("_alert", trigger_sniff)),
                     # XAI explanation from monitor_bridge (None for benign /
                     # when XAI is unavailable). Same shape as upload-path xai.
@@ -507,12 +539,26 @@ class MonitorPage(QWidget):
         # 4. Append row to table
         self._add_row(flow, label, confidence, device, score, score_bucket, trigger_sniff)
 
-        # 5. Status bar
-        self._status_lbl.setText(
-            f"Flows: {self._total_flows}  |  "
-            f"Last inference: {self._last_latency:.1f} ms  |  "
-            f"Alerts: {self._alert_count}"
-        )
+        # 5. Status bar — show detection / XAI / total breakdown when XAI
+        # actually contributed to the run; otherwise the compact legacy line.
+        # The mean XAI cost is more useful than the last-flow value for an
+        # experiment-style readout (last value flaps to 0 ms on every
+        # rate-limited or benign flow).
+        if self._xai_lat_count > 0:
+            xai_avg = self._xai_lat_sum / self._xai_lat_count
+            self._status_lbl.setText(
+                f"Flows: {self._total_flows}  |  "
+                f"Det: {self._last_latency:.1f} ms  |  "
+                f"XAI (avg over {self._xai_lat_count}): {xai_avg:.1f} ms  |  "
+                f"Total: {self._last_latency + xai_avg:.1f} ms  |  "
+                f"Alerts: {self._alert_count}"
+            )
+        else:
+            self._status_lbl.setText(
+                f"Flows: {self._total_flows}  |  "
+                f"Last inference: {self._last_latency:.1f} ms  |  "
+                f"Alerts: {self._alert_count}"
+            )
         self._flow_count_lbl.setText(f"{self._table.rowCount()} rows")
 
     @pyqtSlot(dict)

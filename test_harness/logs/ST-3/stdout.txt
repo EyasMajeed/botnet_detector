@@ -1,0 +1,240 @@
+21:10:22 [INFO] BotnetMonitor - ============================================================
+21:10:22 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:22 [INFO] BotnetMonitor - ============================================================
+21:10:22 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:23 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:23 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:23 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:23 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:23 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:23 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:23 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:23 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:23 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:23 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:25 [INFO] BotnetMonitor - ============================================================
+21:10:25 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:25 [INFO] BotnetMonitor - ============================================================
+21:10:25 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:25 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:25 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:25 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:25 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:25 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:25 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:25 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:25 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:25 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:25 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:26 [INFO] BotnetMonitor - ============================================================
+21:10:26 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:26 [INFO] BotnetMonitor - ============================================================
+21:10:26 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:26 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:26 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:26 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:26 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:26 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:26 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:26 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:26 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:26 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:26 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:28 [INFO] BotnetMonitor - ============================================================
+21:10:28 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:28 [INFO] BotnetMonitor - ============================================================
+21:10:28 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:28 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:28 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:28 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:28 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:28 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:28 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:28 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:28 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:28 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:28 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:30 [INFO] BotnetMonitor - ============================================================
+21:10:30 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:30 [INFO] BotnetMonitor - ============================================================
+21:10:30 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:30 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:30 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:30 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:30 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:30 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:30 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:30 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:30 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:30 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:30 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:32 [INFO] BotnetMonitor - ============================================================
+21:10:32 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:32 [INFO] BotnetMonitor - ============================================================
+21:10:32 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:32 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:32 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:32 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:32 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:32 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:32 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:32 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:32 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:32 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:32 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:34 [INFO] BotnetMonitor - ============================================================
+21:10:34 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:34 [INFO] BotnetMonitor - ============================================================
+21:10:34 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:34 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:34 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:34 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:34 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:34 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:34 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:34 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:34 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:34 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:34 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:36 [INFO] BotnetMonitor - ============================================================
+21:10:36 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:36 [INFO] BotnetMonitor - ============================================================
+21:10:36 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:36 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:36 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:36 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:36 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:36 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:36 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:36 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:36 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:36 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:36 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:38 [INFO] BotnetMonitor - ============================================================
+21:10:38 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:38 [INFO] BotnetMonitor - ============================================================
+21:10:38 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:38 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:38 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:38 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:38 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:38 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:38 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:38 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:38 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:38 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:38 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:40 [INFO] BotnetMonitor - ============================================================
+21:10:40 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:40 [INFO] BotnetMonitor - ============================================================
+21:10:40 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:40 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:40 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:40 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:40 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:40 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:40 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:40 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:40 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:40 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:40 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:41 [INFO] BotnetMonitor - ============================================================
+21:10:41 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:41 [INFO] BotnetMonitor - ============================================================
+21:10:41 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:41 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:41 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:41 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:41 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:41 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:41 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:41 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:41 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:41 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:41 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:43 [INFO] BotnetMonitor - ============================================================
+21:10:43 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:43 [INFO] BotnetMonitor - ============================================================
+21:10:43 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:43 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:43 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:43 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:43 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:43 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:43 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:43 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:43 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:43 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:43 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:45 [INFO] BotnetMonitor - ============================================================
+21:10:45 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:45 [INFO] BotnetMonitor - ============================================================
+21:10:45 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:45 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:45 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:45 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:45 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:45 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:45 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:45 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:45 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:45 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:45 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:47 [INFO] BotnetMonitor - ============================================================
+21:10:47 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:47 [INFO] BotnetMonitor - ============================================================
+21:10:47 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:47 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:47 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:47 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:47 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:47 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:47 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:47 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:47 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:47 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:47 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:49 [INFO] BotnetMonitor - ============================================================
+21:10:49 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:49 [INFO] BotnetMonitor - ============================================================
+21:10:49 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:49 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:49 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:49 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:49 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:49 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:49 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:49 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:49 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:49 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:49 [INFO] BotnetMonitor -   BotnetMonitor ready.
+21:10:51 [INFO] BotnetMonitor - ============================================================
+21:10:51 [INFO] BotnetMonitor -   Initialising BotnetMonitor
+21:10:51 [INFO] BotnetMonitor - ============================================================
+21:10:51 [WARNING] BotnetMonitor - [Stage1] OUI classifier failed to initialise: manuf package required for MAC-based classification.
+Install with: pip install manuf
+21:10:51 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+21:10:51 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)
+21:10:51 [INFO] BotnetMonitor - [Stage2-IoT] Scaler loaded (115 features, raw max=587999989397979136.0)
+21:10:51 [INFO] BotnetMonitor - [Stage2-IoT] Model loaded (threshold=0.5200)
+21:10:51 [INFO] BotnetMonitor - [Stage2-NonIoT] Model loaded (46 features, threshold=0.7656, seq=20)
+21:10:51 [INFO] BotnetMonitor - [Stage2-NonIoT] Scaler loaded (LIVE-CALIBRATED): /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json  (46 features, mean_range=[0.0000, 4071084.2500], scale_range=[0.0482, 17604720.0000])
+21:10:51 [INFO] BotnetMonitor - [Calibration] LiveScalerCalibrator initialised - will fit on 500 NonIoT flows. Live scaler will be saved to: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage2/noniot_scaler_live.json
+21:10:51 [INFO] BotnetMonitor - [Calibration] Live scaler already exists - calibrator disabled.
+21:10:51 [INFO] BotnetMonitor - [XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)
+21:10:51 [INFO] BotnetMonitor -   BotnetMonitor ready.

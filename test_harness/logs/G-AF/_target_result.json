@@ -1,0 +1,14 @@
+{
+  "test_id": "G-AF",
+  "name": "Alert flood",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "flows_changed fires \u2264 200 times",
+  "actual": "100000 rows inserted in 8.91s; flows_changed fired 20 times; store retained 50000 flows",
+  "raw": {
+    "signals_fired": 20,
+    "duration_sec": 8.913,
+    "n_kept": 50000
+  },
+  "_ok": true
+}

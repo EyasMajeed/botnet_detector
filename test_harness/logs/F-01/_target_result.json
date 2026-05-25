@@ -1,0 +1,17 @@
+{
+  "test_id": "F-01",
+  "name": "Truncated PCAPNG",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "validator handled cleanly: {'is_valid': True, 'format': 'FileFormat.PCAPNG', 'error': '', 'size_mb': 0.0, 'row_count': None}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-01/trunc.pcapng",
+  "raw": {
+    "is_valid": true,
+    "format": "FileFormat.PCAPNG",
+    "error": "",
+    "size_mb": 0.0,
+    "row_count": null
+  },
+  "_ok": true
+}

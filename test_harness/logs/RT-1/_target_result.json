@@ -1,0 +1,24 @@
+{
+  "test_id": "RT-1",
+  "name": "Slow beaconing botnet (multi-session)",
+  "severity": "HIGH",
+  "verdict": "FAIL",
+  "expected": "detection rate \u2265 50%",
+  "actual": "only 0/25 (0%) flagged botnet on 25 sessions \u2014 model does not recognise the slow-beacon shape even after _idle=120s fix",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/RT-1/multi_session_beacon.pcap",
+  "raw": {
+    "n_results": 25,
+    "n_botnet": 0,
+    "rate": 0.0,
+    "n_sessions_in": 25,
+    "session_period_sec": 35.0,
+    "first_5_labels": [
+      "benign",
+      "benign",
+      "benign",
+      "benign",
+      "benign"
+    ]
+  },
+  "_ok": true
+}

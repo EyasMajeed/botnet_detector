@@ -1,0 +1,2 @@
+20:58:28 [INFO] BotnetMonitor - [Stage1] RF loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/rf_model.pkl  (LabelEncoder classes=[np.str_('iot'), np.str_('noniot')], iot_idx=0)
+20:58:28 [INFO] BotnetMonitor - [Stage1] Scaler loaded: /Users/eyasmajeed/Dev/botnet_detector-1/models/stage1/s1_scaler.json  (56 features)

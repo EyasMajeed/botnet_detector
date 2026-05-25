@@ -133,6 +133,24 @@ class BotnetMonitorThread(QThread):
     def stop(self) -> None:
         self._running = False
 
+    def set_xai_enabled(self, enabled: bool) -> bool:
+        """
+        Proxy to BotnetMonitor.set_xai_enabled. Called by MainWindow when the
+        user flips the XAI toggle in Settings — propagates the change to a
+        running monitor so explain_flow() is skipped (or resumed) on the next
+        botnet detection. Returns True if the change was applied, False if the
+        monitor hasn't been constructed yet (in which case it'll pick up the
+        flag on next start via MainWindow._apply_xai_setting()).
+        """
+        if self._monitor is None:
+            return False
+        try:
+            self._monitor.set_xai_enabled(bool(enabled))
+            return True
+        except Exception as e:
+            self.error.emit(f"set_xai_enabled failed: {e!r}")
+            return False
+
     # ── QThread entry point ──────────────────────────────────────────────────
     def run(self) -> None:
         if self._monitor is None:
@@ -270,6 +288,12 @@ class BotnetMonitorThread(QThread):
             # XAI explanation (None for benign flows; dict for botnet flows
             # when src.xai is available — see BotnetMonitor.process_packet).
             "_xai":           r.xai,
+            # XAI overhead in ms (0.0 when XAI was skipped/disabled). With
+            # _latency_ms being detection-only by monitoring.py design, the
+            # sum is what the user actually waits for end-to-end.
+            "_xai_latency_ms":   float(getattr(r, "xai_latency_ms", 0.0)),
+            "_total_latency_ms": float(r.latency_ms
+                                       + getattr(r, "xai_latency_ms", 0.0)),
         })
 
     def _emit_stats(self, now: float) -> None:

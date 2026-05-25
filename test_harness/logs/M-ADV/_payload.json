@@ -1,0 +1,1 @@
+{"test_id": "M-ADV", "target": "test_harness.ml_tests.t_adversarial_fgsm:run", "kwargs": {"n_samples": 40, "epsilons": [0.001, 0.005, 0.01]}, "result_path": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/logs/M-ADV/_target_result.json"}

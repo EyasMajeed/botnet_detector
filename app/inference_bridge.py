@@ -66,6 +66,26 @@ USE_REAL_INFERENCE = True
 _xai_bundle = None
 _xai_disabled_reason: str = ""
 
+# Runtime kill-switch driven by AppSettings.xai_enabled. When False,
+# _attach_xai() short-circuits BEFORE bundle init or explain_flow() — so the
+# entire ~95–150 ms / botnet-flow explanation cost is removed from the path.
+# Setting this to False does NOT tear the bundle down; the one-time init is
+# a sunk cost we leave alone so re-enabling mid-session is instant.
+_xai_runtime_enabled: bool = True
+
+
+def set_xai_runtime_enabled(enabled: bool) -> None:
+    """
+    Toggle the XAI explainer at runtime. Called by MainWindow when the user
+    flips the "Explainable AI (XAI)" switch in Settings. Effects:
+      - CSV uploads: _attach_xai() returns immediately with result["xai"]=None
+      - Single-flow inference: same
+      - PCAP uploads / live capture: unaffected here — those go through
+        BotnetMonitor in monitoring.py, which has its own set_xai_enabled().
+    """
+    global _xai_runtime_enabled
+    _xai_runtime_enabled = bool(enabled)
+
 
 def _get_xai_bundle():
     """Lazy-build the ExplainerBundle on first use."""
@@ -97,9 +117,22 @@ def _attach_xai(result: Dict[str, Any], seq: np.ndarray) -> None:
     (benign, unknown, or botnet); we only run the explainer for actual botnet
     detections to save compute (~50 ms per call).
 
+    Also stamps result["xai_latency_ms"] with the wall-clock cost of the
+    explain_flow() call — 0.0 when XAI was skipped (toggle off, benign,
+    bundle unavailable). The result dict's total_latency_ms field is then
+    computed at the dict-build seam as latency_ms + xai_latency_ms.
+
     `seq` is the (k, n_features) sliding window the bridge already built and
     fed to stage2_predict — the SAME numpy array, no DataFrame round-trip.
     """
+    # Default to 0 so every result dict has the field even if we short-circuit.
+    result["xai_latency_ms"] = 0.0
+    # Runtime kill-switch (Settings → Explainable AI toggle). Skip ALL XAI
+    # work — bundle init, SHAP/IG forward passes, and post-processing — so
+    # the latency difference vs the enabled path is the pure XAI cost.
+    if not _xai_runtime_enabled:
+        result["xai"] = None
+        return
     if result.get("label") != "botnet":
         result["xai"] = None
         return
@@ -107,6 +140,7 @@ def _attach_xai(result: Dict[str, Any], seq: np.ndarray) -> None:
     if bundle is None:
         result["xai"] = None
         return
+    t_xai = time.perf_counter()
     try:
         from src.xai import explain_flow
         raw = explain_flow(
@@ -124,6 +158,9 @@ def _attach_xai(result: Dict[str, Any], seq: np.ndarray) -> None:
         # but we double-belt-and-braces anyway because this is in the hot path.
         print(f"[xai] explain_flow() unexpectedly raised: {e!r}")
         result["xai"] = None
+    # Measure XAI cost whether it succeeded or raised — the time was still
+    # spent on the critical path and that's what we're quantifying.
+    result["xai_latency_ms"] = round((time.perf_counter() - t_xai) * 1000, 2)
 
 
 def get_xai_status() -> Dict[str, Any]:
@@ -227,6 +264,10 @@ def run_inference(flow: Dict[str, Any]) -> Dict[str, Any]:
         _attach_xai(result, seq)
     else:
         result["xai"] = None
+        result["xai_latency_ms"] = 0.0
+    # Sum so the GUI can report total = detection + XAI without re-adding.
+    result["total_latency_ms"] = round(
+        result["latency_ms"] + result.get("xai_latency_ms", 0.0), 2)
     return result
 
 
@@ -354,11 +395,31 @@ def _run_csv_inference(info: Any) -> List[Dict[str, Any]]:
             _attach_xai(result, seq)
         else:
             result["xai"] = None
+            result["xai_latency_ms"] = 0.0
         results.append(result)
 
+    # CSV path measures wall-clock TOTAL time (Stage-1 + Stage-2 + XAI for
+    # botnet rows) and averages across all rows, so callers see a consistent
+    # per-row latency_ms regardless of where in the file a row sits. To keep
+    # the XAI-overhead A/B comparable across paths, we expose:
+    #   latency_ms       = avg total per row (legacy field, unchanged)
+    #   xai_latency_ms   = the ACTUAL per-row XAI cost (already per-row)
+    #   total_latency_ms = latency_ms + xai_latency_ms  (just for symmetry
+    #                       with the live-capture path — note this DOUBLE-
+    #                       COUNTS XAI on the CSV path because latency_ms is
+    #                       wall-clock and already includes XAI. We surface
+    #                       both so the GUI can pick the right field per path.)
+    # The Monitor page consumes only the live-capture fields where total
+    # additivity is correct. The Results page displays the raw latency_ms.
     avg_ms = round((time.perf_counter() - t0) * 1000 / max(len(results), 1), 2)
     for r in results:
         r["latency_ms"] = avg_ms
+        # Per-row XAI cost is already set by _attach_xai; default safety.
+        r.setdefault("xai_latency_ms", 0.0)
+        # Total = avg_total - xai_avg + per-row_xai (a row that ran XAI
+        # legitimately spent more than the average). For the experiment, what
+        # matters is xai_latency_ms vs 0.0 — that's the pure XAI delta.
+        r["total_latency_ms"] = round(avg_ms + r["xai_latency_ms"], 2)
     return results
 
 
@@ -611,11 +672,19 @@ def _detection_results_to_dicts(detection_results: List[Any],
             "timestamp":   float(getattr(r, "timestamp", time.time())),
             "s1_method":   str(getattr(r, "s1_method", "ml")),
             "xai":         xai,
+            # ── XAI overhead measurement (for the latency A/B experiment) ─
+            # latency_ms below is detection-only (Stage-1 + Stage-2) per
+            # monitoring.py's design. xai_latency_ms is the additional
+            # explain_flow cost paid for this flow (0.0 when XAI was
+            # skipped). total_latency_ms = sum, which is what end users
+            # actually wait for between packet ingress and a complete row.
+            "xai_latency_ms":   float(getattr(r, "xai_latency_ms", 0.0)),
         })
 
     avg_ms = round((time.perf_counter() - t0) * 1000 / max(len(out), 1), 2)
     for o in out:
         o["latency_ms"] = avg_ms
+        o["total_latency_ms"] = round(avg_ms + o.get("xai_latency_ms", 0.0), 2)
     return out
 
 

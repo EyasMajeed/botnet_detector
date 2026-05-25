@@ -1,0 +1,17 @@
+{
+  "test_id": "ST-1",
+  "name": "Large PCAP throughput",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "completes < 600.0s",
+  "actual": "201000 packets in 41.9s (4792 pps)",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/ST-1/large.pcap",
+  "raw": {
+    "size_mb": 90.4,
+    "duration_sec": 41.95,
+    "pps": 4791.5,
+    "n_processed": 201000,
+    "n_results": 503
+  },
+  "_ok": true
+}

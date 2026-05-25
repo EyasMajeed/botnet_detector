@@ -1,0 +1,115 @@
+{
+  "test_id": "M-T1",
+  "name": "Threshold sweep (synthetic)",
+  "severity": "MEDIUM",
+  "verdict": "FAIL",
+  "expected": "F1 \u2265 0.80 at some threshold; precision and recall both \u2265 0.80",
+  "actual": "best F1 at \u03c4=0.1 only P=0.2828, R=0.205; below 0.80",
+  "csv": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/M-T1/mixed.csv",
+  "raw": {
+    "sweep": [
+      {
+        "tp": 41,
+        "fp": 104,
+        "tn": 496,
+        "fn": 159,
+        "precision": 0.2828,
+        "recall": 0.205,
+        "f1": 0.2377,
+        "accuracy": 0.6713,
+        "threshold": 0.1
+      },
+      {
+        "tp": 33,
+        "fp": 83,
+        "tn": 517,
+        "fn": 167,
+        "precision": 0.2845,
+        "recall": 0.165,
+        "f1": 0.2089,
+        "accuracy": 0.6875,
+        "threshold": 0.2
+      },
+      {
+        "tp": 30,
+        "fp": 75,
+        "tn": 525,
+        "fn": 170,
+        "precision": 0.2857,
+        "recall": 0.15,
+        "f1": 0.1967,
+        "accuracy": 0.6937,
+        "threshold": 0.3
+      },
+      {
+        "tp": 27,
+        "fp": 67,
+        "tn": 533,
+        "fn": 173,
+        "precision": 0.2872,
+        "recall": 0.135,
+        "f1": 0.1837,
+        "accuracy": 0.7,
+        "threshold": 0.4
+      },
+      {
+        "tp": 26,
+        "fp": 61,
+        "tn": 539,
+        "fn": 174,
+        "precision": 0.2989,
+        "recall": 0.13,
+        "f1": 0.1812,
+        "accuracy": 0.7063,
+        "threshold": 0.5
+      },
+      {
+        "tp": 23,
+        "fp": 57,
+        "tn": 543,
+        "fn": 177,
+        "precision": 0.2875,
+        "recall": 0.115,
+        "f1": 0.1643,
+        "accuracy": 0.7075,
+        "threshold": 0.6
+      },
+      {
+        "tp": 20,
+        "fp": 49,
+        "tn": 551,
+        "fn": 180,
+        "precision": 0.2899,
+        "recall": 0.1,
+        "f1": 0.1487,
+        "accuracy": 0.7137,
+        "threshold": 0.7
+      },
+      {
+        "tp": 18,
+        "fp": 40,
+        "tn": 560,
+        "fn": 182,
+        "precision": 0.3103,
+        "recall": 0.09,
+        "f1": 0.1395,
+        "accuracy": 0.7225,
+        "threshold": 0.8
+      },
+      {
+        "tp": 14,
+        "fp": 34,
+        "tn": 566,
+        "fn": 186,
+        "precision": 0.2917,
+        "recall": 0.07,
+        "f1": 0.1129,
+        "accuracy": 0.725,
+        "threshold": 0.9
+      }
+    ],
+    "n_used": 800,
+    "n_unknown": 0
+  },
+  "_ok": true
+}

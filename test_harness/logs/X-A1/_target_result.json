@@ -1,0 +1,14 @@
+{
+  "test_id": "X-A1",
+  "name": "XAI sanity battery",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "repeat\u22650.95, perturb\u22650.80 (top-3 \u2229 \u22652), sign\u22650.80",
+  "actual": "all stability metrics within target: {'repeat_stability_rate': 1.0, 'perturb_stability_rate': 1.0, 'sign_coherence_rate': 0.0}",
+  "raw": {
+    "repeat_stability_rate": 1.0,
+    "perturb_stability_rate": 1.0,
+    "sign_coherence_rate": 0.0
+  },
+  "_ok": true
+}

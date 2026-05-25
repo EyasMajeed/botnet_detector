@@ -543,9 +543,15 @@ class ResultsPage(QWidget):
             ("Flow ID","id"), ("Src IP","src"), ("Dst IP","dst"),
             ("Protocol","proto"), ("Duration","dur"), ("Bytes","bytes"),
             ("Device","dev"), ("Prediction","lbl"), ("Confidence","conf"),
+            # Latency breakdown — detection vs XAI vs total. Makes the
+            # XAI-overhead A/B experiment observable per flow without
+            # leaving the GUI.
+            ("Detection latency","lat"), ("XAI latency","xai_lat"),
+            ("Total latency","tot_lat"),
         ]:
             r  = QHBoxLayout(); r.addWidget(L(lbl_, 11, color=TD)); r.addStretch()
-            vl = L("—", 11, mono=(key in ("src","dst","id","conf")))
+            vl = L("—", 11, mono=(key in ("src","dst","id","conf",
+                                           "lat","xai_lat","tot_lat")))
             self.df[key] = vl; r.addWidget(vl); rv.addLayout(r)
         rv.addWidget(SEP())
         # XAI panel — wrapped in self.xai_card so it can be hidden via Settings.
@@ -656,6 +662,26 @@ class ResultsPage(QWidget):
             f"color:{ERR if ib else OK};background:transparent;font-weight:bold;")
         self.df["conf"].setText(f"{f.confidence:.2f}")
 
+        # ── Latency breakdown ─────────────────────────────────────────────
+        # detection_latency = Stage-1 + Stage-2 only (monitoring.py design);
+        # xai_latency = explain_flow() cost (0 when toggle was off / skipped);
+        # total = sum. Tinted so the XAI cost stands out at a glance.
+        det_lat = float(getattr(f, "latency_ms", 0.0))
+        xai_lat = float(getattr(f, "xai_latency_ms", 0.0))
+        tot_lat = det_lat + xai_lat
+        self.df["lat"].setText(f"{det_lat:.1f} ms")
+        if xai_lat > 0.0:
+            self.df["xai_lat"].setText(f"{xai_lat:.1f} ms")
+            self.df["xai_lat"].setStyleSheet(
+                f"color:{YEL};background:transparent;")
+        else:
+            self.df["xai_lat"].setText("— (off)")
+            self.df["xai_lat"].setStyleSheet(
+                f"color:{TG};background:transparent;")
+        self.df["tot_lat"].setText(f"{tot_lat:.1f} ms")
+        self.df["tot_lat"].setStyleSheet(
+            f"color:{TW};background:transparent;font-weight:bold;")
+
         # ── XAI panel ─────────────────────────────────────────────────────
         # Real XAI when available (f.xai is a dict from src.xai.explain_flow);
         # mock data otherwise (legacy rows from before XAI was wired in, or
@@ -718,6 +744,10 @@ class ResultsPage(QWidget):
             w.setText("—")
             if k == "lbl":
                 w.setStyleSheet(f"color:{TG};background:transparent;font-weight:bold;")
+            elif k in ("xai_lat", "tot_lat"):
+                # Reset coloured/bold styling so a stale red-XAI from a
+                # previous botnet selection doesn't bleed into the cleared view.
+                w.setStyleSheet(f"color:{TG};background:transparent;")
         self.expl.setText("Select a flow to view.")
         self.expl.setStyleSheet(
             f"color:{TG};background:{BG};border-left:3px solid {BDR};"
@@ -1196,6 +1226,11 @@ class MainWindow(QMainWindow):
         # Settings → threshold change → retroactively re-label all stored flows.
         self.settings.settings_changed.connect(self._on_settings_changed)
 
+        # Push the persisted XAI flag down to inference_bridge BEFORE any
+        # inference can run. The live capture / PCAP threads pick it up on
+        # construction via _apply_xai_setting() once they exist.
+        self._apply_xai_setting()
+
     # ── Slots ────────────────────────────────────────────────────────────────
     def _go(self, idx):
         self.stk.setCurrentIndex(idx); self.hdr.set_title(TITLES[idx])
@@ -1249,6 +1284,8 @@ class MainWindow(QMainWindow):
                 s1_confidence = float(r.get("stage1_conf", 0.0)),
                 suspicion     = float(r.get("suspicion", 0.0)),     # NEW
                 latency_ms    = float(r.get("latency_ms", 0.0)),
+                # XAI overhead (0.0 when toggle was off or flow was benign).
+                xai_latency_ms = float(r.get("xai_latency_ms", 0.0)),
                 alerted       = bool(r.get("alerted", False)),       # NEW
                 timestamp     = float(r.get("timestamp", 0.0))       # NEW
                                 or datetime.now().timestamp(),
@@ -1366,6 +1403,55 @@ class MainWindow(QMainWindow):
                 if changed else
                 f"Confidence threshold = {t:.2f}  (no flows changed)"
             )
+        elif key == "xai_enabled":
+            # Full kill-switch: stop computing explanations everywhere, not
+            # just hide the panel. Lets us A/B latency with vs without XAI.
+            self._apply_xai_setting()
+            on = self.settings.xai_enabled
+            self.sbar.set(
+                f"XAI {'enabled' if on else 'DISABLED'} — "
+                f"new detections will {'include' if on else 'skip'} explanations"
+            )
+
+    def _apply_xai_setting(self) -> None:
+        """
+        Propagate self.settings.xai_enabled to every component that actually
+        runs XAI: the inference_bridge module (CSV / single-flow path), the
+        live capture monitor thread (if its monitor has been built), and the
+        active PCAP worker (if any). Safe to call any time — each downstream
+        component no-ops gracefully when it's not ready yet.
+        """
+        enabled = self.settings.xai_enabled
+
+        # 1) Module-level flag for inference_bridge (CSV uploads + single
+        #    flow). Import is local so a missing module doesn't break Settings.
+        try:
+            import inference_bridge
+            inference_bridge.set_xai_runtime_enabled(enabled)
+        except Exception as e:
+            print(f"[xai-toggle] inference_bridge update failed: {e!r}")
+
+        # 2) Live capture thread — only the monitor instance carries the flag.
+        #    Before first Start click, _monitor is None and the proxy returns
+        #    False; start_capture() will build the monitor with default True,
+        #    so we re-apply right after to keep state consistent.
+        try:
+            mp = getattr(self, "monitor_page", None)
+            th = getattr(mp, "_thread", None) if mp is not None else None
+            if th is not None and hasattr(th, "set_xai_enabled"):
+                th.set_xai_enabled(enabled)
+        except Exception as e:
+            print(f"[xai-toggle] live monitor update failed: {e!r}")
+
+        # 3) Active PCAP worker (only exists during an upload-PCAP run).
+        try:
+            up = getattr(self, "upload_page", None)
+            w  = getattr(up, "_pcap_worker", None) if up is not None else None
+            if w is not None and hasattr(w, "set_xai_enabled"):
+                w.set_xai_enabled(enabled)
+        except Exception as e:
+            print(f"[xai-toggle] pcap worker update failed: {e!r}")
+
     
     def closeEvent(self, event):
         """Stop background work cleanly so threads don't outlive the GUI."""

@@ -1,0 +1,16 @@
+{
+  "test_id": "S1-06",
+  "name": "MAC-OUI spoofing override",
+  "severity": "CRITICAL",
+  "verdict": "SKIPPED",
+  "expected": "\u22655 flow results to draw a conclusion",
+  "actual": "only 1 result(s) from 200 packets (200 processed, 0 per-packet errors). Insufficient data \u2014 fix replay first.",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/S1-06/spoofed_oui.pcap",
+  "raw": {
+    "n_seen": 200,
+    "n_processed": 200,
+    "n_results": 1,
+    "errors_sample": []
+  },
+  "_ok": true
+}

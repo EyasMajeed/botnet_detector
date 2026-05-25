@@ -1,0 +1,9 @@
+WARNING: getmacbyip failed on Permission denied: could not open /dev/bpf0. Make sure to be running Scapy as root ! (sudo)
+WARNING: MAC address to reach destination not found. Using broadcast.
+WARNING: getmacbyip failed on Permission denied: could not open /dev/bpf0. Make sure to be running Scapy as root ! (sudo)
+WARNING: MAC address to reach destination not found. Using broadcast.
+WARNING: more getmacbyip failed on Permission denied: could not open /dev/bpf0. Make sure to be running Scapy as root ! (sudo)
+WARNING: more MAC address to reach destination not found. Using broadcast.
+[xai] Stage1Explainer disabled: ImportError: Stage1Explainer requires the `shap` package.
+Install with: pip install shap
+(Stage2 explainers work without shap — only Stage-1 needs it.)

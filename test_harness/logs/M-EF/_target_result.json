@@ -1,0 +1,16 @@
+{
+  "test_id": "M-EF",
+  "name": "Empty-flow regression",
+  "severity": "HIGH",
+  "verdict": "FAIL",
+  "expected": "avg confidence < 0.05",
+  "actual": "avg confidence 0.3188 on empty flows is no longer near zero \u2014 scaler may have been re-fit (good) OR something else changed.",
+  "csv": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/M-EF/empty_flows.csv",
+  "raw": {
+    "avg": 0.318809,
+    "min": 1.3340696796149132e-06,
+    "max": 0.9999988079071045,
+    "n": 200
+  },
+  "_ok": true
+}

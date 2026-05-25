@@ -1,0 +1,97 @@
+{
+  "test_id": "M-CAL",
+  "name": "Confidence calibration",
+  "severity": "MEDIUM",
+  "verdict": "FAIL",
+  "expected": "ECE \u2264 0.1",
+  "actual": "ECE = 0.4572 exceeds 0.1; model confidence is not well-calibrated.",
+  "csv": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/M-CAL/calib.csv",
+  "raw": {
+    "ece": 0.4572,
+    "n_bins": 10,
+    "n_used": 800,
+    "table": [
+      {
+        "bin_lo": 0.0,
+        "bin_hi": 0.1,
+        "count": 141,
+        "avg_conf": 0.0095,
+        "obs_rate": 0.461,
+        "abs_gap": 0.4514
+      },
+      {
+        "bin_lo": 0.1,
+        "bin_hi": 0.2,
+        "count": 12,
+        "avg_conf": 0.1489,
+        "obs_rate": 0.5,
+        "abs_gap": 0.3511
+      },
+      {
+        "bin_lo": 0.2,
+        "bin_hi": 0.3,
+        "count": 11,
+        "avg_conf": 0.2644,
+        "obs_rate": 0.6364,
+        "abs_gap": 0.3719
+      },
+      {
+        "bin_lo": 0.3,
+        "bin_hi": 0.4,
+        "count": 7,
+        "avg_conf": 0.3714,
+        "obs_rate": 0.5714,
+        "abs_gap": 0.2
+      },
+      {
+        "bin_lo": 0.4,
+        "bin_hi": 0.5,
+        "count": 11,
+        "avg_conf": 0.4456,
+        "obs_rate": 0.3636,
+        "abs_gap": 0.0819
+      },
+      {
+        "bin_lo": 0.5,
+        "bin_hi": 0.6,
+        "count": 10,
+        "avg_conf": 0.5557,
+        "obs_rate": 0.2,
+        "abs_gap": 0.3557
+      },
+      {
+        "bin_lo": 0.6,
+        "bin_hi": 0.7,
+        "count": 6,
+        "avg_conf": 0.6428,
+        "obs_rate": 0.8333,
+        "abs_gap": 0.1905
+      },
+      {
+        "bin_lo": 0.7,
+        "bin_hi": 0.8,
+        "count": 13,
+        "avg_conf": 0.753,
+        "obs_rate": 0.6154,
+        "abs_gap": 0.1376
+      },
+      {
+        "bin_lo": 0.8,
+        "bin_hi": 0.9,
+        "count": 13,
+        "avg_conf": 0.8556,
+        "obs_rate": 0.6154,
+        "abs_gap": 0.2402
+      },
+      {
+        "bin_lo": 0.9,
+        "bin_hi": 1.0,
+        "count": 576,
+        "avg_conf": 0.9946,
+        "obs_rate": 0.5052,
+        "abs_gap": 0.4894
+      }
+    ]
+  },
+  "_ok": true
+}

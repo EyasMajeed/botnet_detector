@@ -1,0 +1,17 @@
+{
+  "test_id": "F-02",
+  "name": "Claimed-huge PCAP header",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "detected as PCAP without parsing body: {'is_valid': True, 'format': 'FileFormat.PCAP', 'error': '', 'size_mb': 0.0, 'row_count': None}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-02/huge_claim.pcap",
+  "raw": {
+    "is_valid": true,
+    "format": "FileFormat.PCAP",
+    "error": "",
+    "size_mb": 0.0,
+    "row_count": null
+  },
+  "_ok": true
+}

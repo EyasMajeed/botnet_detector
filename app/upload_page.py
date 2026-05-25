@@ -582,6 +582,17 @@ class UploadPage(QWidget):
             self._reset_pcap_run_ui()
             return
 
+        # Propagate the current XAI toggle into the freshly-built monitor
+        # before the worker starts processing packets. We resolve AppSettings
+        # via the parent chain (MainWindow.settings) so UploadPage's existing
+        # signature stays intact. Missing settings → leave default (enabled).
+        try:
+            settings = self._resolve_app_settings()
+            if settings is not None and hasattr(worker, "set_xai_enabled"):
+                worker.set_xai_enabled(settings.xai_enabled)
+        except Exception as e:
+            print(f"[upload_page] xai toggle propagation failed: {e!r}")
+
         # Phase 2: wire signals, repurpose Run button as Cancel, start worker.
         worker.progress.connect(self._on_pcap_progress)
         worker.error.connect(self._on_pcap_error)
@@ -642,3 +653,22 @@ class UploadPage(QWidget):
         self._run_btn.setText("▶  Run Detection")
         self._run_btn.setEnabled(self._current_file is not None)
         self._pcap_worker = None
+
+    def _resolve_app_settings(self):
+        """
+        Walk up the parent chain to find MainWindow.settings (AppSettings).
+        UploadPage was historically constructed without a settings handle
+        (see MainWindow line where it's instantiated). We avoid changing
+        UploadPage.__init__'s signature by resolving lazily here, only when
+        we actually need to push a setting into a worker. Returns the
+        AppSettings instance or None if not reachable.
+        """
+        w = self.parent()
+        for _ in range(8):                # cap depth — Qt widget trees aren't infinite
+            if w is None:
+                break
+            s = getattr(w, "settings", None)
+            if s is not None:
+                return s
+            w = w.parent() if hasattr(w, "parent") else None
+        return None

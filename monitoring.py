@@ -327,6 +327,12 @@ class DetectionResult:
     # label == "botnet". None for benign / unknown labels (we save compute
     # by not explaining benign flows). Shape matches src.xai.explain_flow().
     xai: Optional[dict] = None
+    # Wall-clock cost of explain_flow() for this detection, in ms. 0.0 when
+    # XAI was skipped (benign label, runtime toggle off, rate-limited, or
+    # bundle unavailable). Lets the GUI compute total_latency_ms = latency_ms
+    # + xai_latency_ms for the XAI-overhead A/B experiment without forcing
+    # callers to time XAI themselves.
+    xai_latency_ms: float = 0.0
 
 
 # ══════════════════════════════════════════════════════════════════════════════
@@ -1444,21 +1450,58 @@ class BotnetMonitor:
         # Failure to import or build is logged as a warning, NOT raised —
         # detection must keep working even if XAI is unavailable.
         self._xai_bundle = None
-        try:
-            from src.xai import ExplainerBundle
-            self._xai_bundle = ExplainerBundle(
-                stage1_classifier = self.s1,
-                iot_detector      = self.s2_iot,
-                noniot_detector   = self.s2_noniot,
-            )
-            log.info("[XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)")
-        except ImportError as e:
-            log.warning("[XAI] src.xai module not importable - "
-                        "explanations disabled: %s", e)
-        except Exception as e:
-            log.warning("[XAI] Bundle init failed - explanations disabled: %s", e)
+        # Runtime kill-switch driven by the GUI's AppSettings.xai_enabled.
+        # When False, process_packet() skips the explain_flow() call entirely
+        # (no SHAP / IG forward pass), removing the ~95–150 ms/botnet-flow
+        # explanation cost. The bundle stays loaded so re-enabling mid-
+        # session is instant. Defaults to True so the CLI / headless paths
+        # (which never call set_xai_enabled) preserve historical behaviour.
+        #
+        # HARNESS A/B kill-switch: when BOTNET_DISABLE_XAI=1 is set in the
+        # environment, force-disable XAI at construction time so the test
+        # harness can run ST-2b-AB with and without XAI without editing
+        # source between runs. The env var only AFFECTS the default; the
+        # GUI toggle (set_xai_enabled) can still override it post-construct.
+        import os as _os
+        _env_off = _os.environ.get("BOTNET_DISABLE_XAI", "").strip().lower() in (
+            "1", "true", "yes", "on")
+        self._xai_enabled: bool = not _env_off
+        if _env_off:
+            log.info("[XAI] disabled via BOTNET_DISABLE_XAI — "
+                     "skipping bundle init for clean A/B baseline")
+        else:
+            try:
+                from src.xai import ExplainerBundle
+                self._xai_bundle = ExplainerBundle(
+                    stage1_classifier = self.s1,
+                    iot_detector      = self.s2_iot,
+                    noniot_detector   = self.s2_noniot,
+                )
+                log.info("[XAI] ExplainerBundle initialised (IoT + NonIoT explainers ready)")
+            except ImportError as e:
+                log.warning("[XAI] src.xai module not importable - "
+                            "explanations disabled: %s", e)
+            except Exception as e:
+                log.warning("[XAI] Bundle init failed - explanations disabled: %s", e)
 
         log.info("  BotnetMonitor ready.")
+
+    def set_xai_enabled(self, enabled: bool) -> None:
+        """
+        Runtime toggle for the XAI explainer (called from the GUI when the
+        user flips the "Explainable AI (XAI)" switch in Settings). When
+        disabled, process_packet skips the explain_flow() call entirely —
+        no SHAP / IG forward pass, no per-flow attribution. DetectionResult
+        is still produced, just with xai=None.
+
+        Re-enabling re-arms the existing _xai_bundle (no re-construction),
+        so the next botnet flow gets a fresh explanation immediately.
+        """
+        new_val = bool(enabled)
+        if new_val != self._xai_enabled:
+            log.info("[XAI] runtime toggle → %s",
+                     "ENABLED" if new_val else "DISABLED")
+        self._xai_enabled = new_val
 
     def process_packet(self, timestamp: float,
                        src_ip: str, dst_ip: str,
@@ -1611,11 +1654,15 @@ class BotnetMonitor:
         # DetectionResult — they just inherit no `xai` field. The GUI can
         # surface the most-recent attribution for that src_ip on click.
         xai_dict = None
-        if label == "botnet" and self._xai_bundle is not None:
+        xai_lat_ms = 0.0
+        if (label == "botnet"
+                and self._xai_bundle is not None
+                and self._xai_enabled):
             now           = rec.last_seen
             last_xai_ts   = self._xai_last_ts.get(src_ip, 0.0)
             should_explain = (now - last_xai_ts) >= self.XAI_MIN_INTERVAL_SEC
             if should_explain:
+                t_xai = time.perf_counter()
                 try:
                     from src.xai import explain_flow
                     xai_dict = explain_flow(
@@ -1632,6 +1679,11 @@ class BotnetMonitor:
                     log.warning("[XAI] explain_flow raised on %s flow %s: %r",
                                 device_type, src_ip, e)
                     xai_dict = None
+                # Measure XAI cost whether it succeeded or raised — the time
+                # was still spent on the critical path and that's what we're
+                # quantifying. Skipped (rate-limited / disabled / benign)
+                # paths legitimately have 0.0.
+                xai_lat_ms = (time.perf_counter() - t_xai) * 1000
             else:
                 # Within rate-limit window — skip silently. Counter is for
                 # observability via /stats.
@@ -1645,6 +1697,7 @@ class BotnetMonitor:
             alerted=alerted, timestamp=rec.last_seen,
             s1_method=s1_method,
             xai=xai_dict,
+            xai_latency_ms=round(xai_lat_ms, 2),
         )
         self._results.append(result)
         log.debug("  [Flow] %-22s dev=%-6s label=%-7s s1=%.2f s2=%.2f lat=%.1fms",

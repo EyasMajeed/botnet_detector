@@ -1,0 +1,17 @@
+{
+  "test_id": "F-04",
+  "name": "Header-only CSV",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "validator did not crash: {'is_valid': True, 'format': 'FileFormat.CSV_GENERIC', 'error': '', 'size_mb': 0.0, 'row_count': 0}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-04/header_only.csv",
+  "raw": {
+    "is_valid": true,
+    "format": "FileFormat.CSV_GENERIC",
+    "error": "",
+    "size_mb": 0.0,
+    "row_count": 0
+  },
+  "_ok": true
+}

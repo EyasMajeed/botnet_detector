@@ -1,0 +1,27 @@
+{
+  "test_id": "M-ADV",
+  "name": "Scaler-aware adversarial perturbation",
+  "severity": "HIGH",
+  "verdict": "FAIL",
+  "expected": "max routing-flip rate \u2264 30% at any tested \u03b5",
+  "actual": "max flip rate 100% \u2014 Stage-1 is brittle to scaler-aware feature-space perturbations.",
+  "csv": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/M-ADV/adv_seed.csv",
+  "raw": {
+    "eps=0.001": {
+      "flipped": 67,
+      "attempted": 80,
+      "rate": 0.838
+    },
+    "eps=0.005": {
+      "flipped": 79,
+      "attempted": 80,
+      "rate": 0.988
+    },
+    "eps=0.01": {
+      "flipped": 80,
+      "attempted": 80,
+      "rate": 1.0
+    }
+  },
+  "_ok": true
+}

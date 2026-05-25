@@ -1,0 +1,13 @@
+{
+  "test_id": "P-02",
+  "name": "Malformed Ethernet frames",
+  "severity": "HIGH",
+  "verdict": "PASS",
+  "expected": "Replay survives; per-packet exceptions logged but contained",
+  "actual": "0/50 packets processed; 0 per-packet errors logged",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/P-02/malformed_eth.pcap",
+  "raw": {
+    "errors_sample": []
+  },
+  "_ok": true
+}

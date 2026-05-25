@@ -1,0 +1,34 @@
+{
+  "test_id": "M-WS",
+  "name": "Window starvation",
+  "severity": "HIGH",
+  "verdict": "FAIL",
+  "expected": "F1 drop \u2264 0.05 between balanced and starved",
+  "actual": "F1 drops 62.7 pp under unique-IP starvation: 0.6273 \u2192 0.0; recall drops 85.0 pp (0.85 \u2192 0.0). The LSTM has not seen 1-real + 19-padded sequences at training time.",
+  "csv": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/M-WS/balanced.csv",
+  "raw": {
+    "balanced": {
+      "tp": 170,
+      "fp": 172,
+      "tn": 28,
+      "fn": 30,
+      "precision": 0.4971,
+      "recall": 0.85,
+      "f1": 0.6273,
+      "accuracy": 0.495
+    },
+    "starved": {
+      "tp": 0,
+      "fp": 0,
+      "tn": 200,
+      "fn": 200,
+      "precision": 0.0,
+      "recall": 0.0,
+      "f1": 0.0,
+      "accuracy": 0.5
+    },
+    "drop_f1": 0.6273,
+    "drop_recall": 0.85
+  },
+  "_ok": true
+}

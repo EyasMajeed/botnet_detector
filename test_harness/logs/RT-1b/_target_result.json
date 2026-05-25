@@ -1,0 +1,23 @@
+{
+  "test_id": "RT-1b",
+  "name": "Slow-C2 evasion (period > idle)",
+  "severity": "HIGH",
+  "verdict": "FAIL",
+  "expected": "detection rate \u2265 30%",
+  "actual": "only 0/25 (0%) flagged botnet \u2014 slow-C2 evasion at period > idle is effective. Detection requires cross-session temporal aggregation per src_ip; the LSTM's per-flow input window cannot see across flows.",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/RT-1b/slow_c2_beacon.pcap",
+  "raw": {
+    "n_results": 25,
+    "n_botnet": 0,
+    "rate": 0.0,
+    "session_period_sec": 180.0,
+    "first_5_labels": [
+      "benign",
+      "benign",
+      "benign",
+      "benign",
+      "benign"
+    ]
+  },
+  "_ok": true
+}

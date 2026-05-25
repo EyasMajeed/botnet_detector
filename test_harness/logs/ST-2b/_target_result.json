@@ -1,0 +1,18 @@
+{
+  "test_id": "ST-2b",
+  "name": "End-to-end throughput",
+  "severity": "MEDIUM",
+  "verdict": "FAIL",
+  "expected": "end-to-end \u2265 200 pps",
+  "actual": "end-to-end only 69 pps (ingest is fine at 34526 pps, but flush of 10000 flows took 145.5s = 69 flow/s). The bottleneck is flow finalisation: Stage-2 inference + per-flow XAI.",
+  "raw": {
+    "ingest_pps": 34526.0,
+    "ingest_dur_sec": 0.29,
+    "flush_dur_sec": 145.475,
+    "flushed_flows": 10000,
+    "flow_per_sec": 68.7,
+    "e2e_pps": 68.6,
+    "n_packets": 10000
+  },
+  "_ok": true
+}

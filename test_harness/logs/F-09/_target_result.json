@@ -1,0 +1,17 @@
+{
+  "test_id": "F-09",
+  "name": "Zip bomb disguised as pcap",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "correctly not classified as PCAP: {'is_valid': False, 'format': 'FileFormat.UNKNOWN', 'error': \"Unrecognised file format (extension: '.pcap'). Supported: .pcap, .pcapng, .csv, .txt, .log, .nfcapd, .nfdump\", 'size_mb': 0.0, 'row_count': None}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-09/bomb.pcap",
+  "raw": {
+    "is_valid": false,
+    "format": "FileFormat.UNKNOWN",
+    "error": "Unrecognised file format (extension: '.pcap'). Supported: .pcap, .pcapng, .csv, .txt, .log, .nfcapd, .nfdump",
+    "size_mb": 0.0,
+    "row_count": null
+  },
+  "_ok": true
+}

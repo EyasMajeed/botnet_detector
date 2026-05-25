@@ -19,7 +19,7 @@ from __future__ import annotations
 
 import json
 import time
-from dataclasses import dataclass, field, asdict
+from dataclasses import dataclass, field, asdict, fields as dataclass_fields
 from datetime import datetime
 from pathlib import Path
 from typing import List, Optional
@@ -84,7 +84,12 @@ class DetectionFlow:
     device_type:   str   = "noniot"      # "iot" | "noniot"
     s1_confidence: float = 0.0
     suspicion:     float = 0.0
-    latency_ms:    float = 0.0
+    latency_ms:    float = 0.0           # detection-only (Stage-1 + Stage-2)
+    # XAI overhead measurement. 0.0 when XAI was skipped (toggle off, benign,
+    # rate-limited). Persisted so reports / CSV exports preserve the data
+    # for offline analysis of the XAI-overhead A/B experiment. Backwards-
+    # compatible: stores written before this field still load (default 0.0).
+    xai_latency_ms: float = 0.0
     alerted:       bool  = False
     timestamp:     float = field(default_factory=lambda: datetime.now().timestamp())
     # Provenance
@@ -283,8 +288,18 @@ class DetectionStore(QObject):
         try:
             with open(self.persist_path) as fp:
                 data = json.load(fp)
-            self.flows   = [DetectionFlow(**fd) for fd in data.get("flows", [])]
-            self.reports = [Report(**rd)        for rd in data.get("reports", [])]
+            # Defensive constructor: ignore unknown keys so a store written
+            # by a newer version (with extra fields) still loads in an older
+            # version, instead of TypeError'ing out and wiping the user's
+            # history. Missing keys fall through to dataclass defaults.
+            _flow_fields = {f.name for f in dataclass_fields(DetectionFlow)}
+            _rep_fields  = {f.name for f in dataclass_fields(Report)}
+            self.flows   = [DetectionFlow(**{k: v for k, v in fd.items()
+                                             if k in _flow_fields})
+                            for fd in data.get("flows", [])]
+            self.reports = [Report(**{k: v for k, v in rd.items()
+                                      if k in _rep_fields})
+                            for rd in data.get("reports", [])]
             self._next_report_n = int(data.get("next_report_n", len(self.reports) + 1))
         except Exception as e:
             print(f"[DetectionStore] load failed: {e!r}")

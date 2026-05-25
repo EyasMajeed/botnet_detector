@@ -1,0 +1,15 @@
+{
+  "test_id": "ST-2a",
+  "name": "Ingestion throughput (process_packet only)",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "\u2265 5000 pps for the ingestion hot path",
+  "actual": "10000 packets in 0.24s = 41073 pps (0.024 ms/call)",
+  "raw": {
+    "pps": 41072.8,
+    "duration_sec": 0.243,
+    "ms_per_packet": 0.0243,
+    "n_packets": 10000
+  },
+  "_ok": true
+}

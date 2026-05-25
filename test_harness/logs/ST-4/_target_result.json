@@ -1,0 +1,14 @@
+{
+  "test_id": "ST-4",
+  "name": "Concurrent uploads",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "4\u00d73 uploads complete cleanly",
+  "actual": "12 runs in 5.41s, avg 1.80s/run",
+  "raw": {
+    "wall_sec": 5.41,
+    "avg_run_sec": 1.801,
+    "n_runs": 12
+  },
+  "_ok": true
+}

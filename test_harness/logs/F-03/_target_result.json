@@ -1,0 +1,17 @@
+{
+  "test_id": "F-03",
+  "name": "Oversized CSV",
+  "severity": "MEDIUM",
+  "verdict": "PASS",
+  "expected": "no crash; correct verdict",
+  "actual": "detected: {'is_valid': True, 'format': 'FileFormat.CSV_GENERIC', 'error': '', 'size_mb': 50.0, 'row_count': 158399}",
+  "pcap": "/Users/eyasmajeed/Dev/botnet_detector-1/test_harness/artifacts/F-03/huge.csv",
+  "raw": {
+    "is_valid": true,
+    "format": "FileFormat.CSV_GENERIC",
+    "error": "",
+    "size_mb": 50.0,
+    "row_count": 158399
+  },
+  "_ok": true
+}
