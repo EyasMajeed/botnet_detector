@@ -524,7 +524,7 @@ See `test_harness/README.md` for the per-test contract and CI recipe.
 
 | Name | Student ID | Role |
 |---|---|---|
-| Iyas Majeed | 2236567 | — |
+| Eyas Majeed | 2236567 | — |
 | Omar Alsiary | 2236983 | — |
 | Zeyad Alghamdi | 2237000 | — |
 
@@ -548,7 +548,7 @@ Third-party libraries retain their original licenses (see
 
 When citing this work, please reference the final report:
 
-> Majeed, I., Alsiary, O., Alghamdi, Z. (2026). *Hybrid AI-Based Botnet
+> Majeed, E., Alsiary, O., Alghamdi, Z. (2026). *Hybrid AI-Based Botnet
 > Detection Using Two-Stage CNN-LSTM Models with Explainable AI.* Graduation
 > Project, Faculty of Computing and Information Technology, King Abdulaziz
 > University.
